@@ -1,0 +1,24 @@
+html,
+body,
+#game {
+  width: 100%;
+  min-height: 100dvh;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: linear-gradient(155deg, #fffaf2 0%, #f3efff 52%, #e9f7ff 100%);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#game {
+  display: grid;
+  place-items: center;
+}
+
+canvas {
+  display: block;
+}
