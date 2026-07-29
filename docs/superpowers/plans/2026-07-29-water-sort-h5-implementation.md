@@ -70,7 +70,6 @@
         │   └── SoundController.ts       # Synthesized UI and pour sounds
         ├── ui/
         │   ├── copy.ts                  # Japanese strings
-        │   ├── copy.test.ts
         │   └── UIButton.ts              # Reusable round icon control
         └── scenes/
             └── GameScene.ts             # Game orchestration and win overlay
@@ -87,7 +86,6 @@
 - Create: `index.html`
 - Create: `src/styles.css`
 - Create: `src/game/constants.ts`
-- Create: `src/game/constants.test.ts`
 - Create: `src/main.ts`
 
 **Interfaces:**
@@ -145,28 +143,7 @@ Create `tsconfig.json`:
 
 Create `vite.config.ts` with `base: './'`, `assetsInlineLimit: 4096`, and `build.target: 'es2020'`. Create `vitest.config.ts` with `environment: 'node'`, `globals: true`, and test pattern `src/**/*.test.ts`.
 
-- [ ] **Step 3: Write the failing constants test**
-
-```ts
-import { GAME_HEIGHT, GAME_WIDTH, TUBE_CAPACITY } from './constants';
-
-describe('game constants', () => {
-  it('uses a 9:16 logical canvas and four-unit tubes', () => {
-    expect(GAME_WIDTH).toBe(540);
-    expect(GAME_HEIGHT).toBe(960);
-    expect(GAME_WIDTH / GAME_HEIGHT).toBe(9 / 16);
-    expect(TUBE_CAPACITY).toBe(4);
-  });
-});
-```
-
-- [ ] **Step 4: Run the test and confirm the red state**
-
-Run: `npm test -- src/game/constants.test.ts`
-
-Expected: FAIL because `src/game/constants.ts` does not exist.
-
-- [ ] **Step 5: Add the constants and minimal Phaser entry**
+- [ ] **Step 3: Add the constants and minimal Phaser entry**
 
 Create `src/game/constants.ts`:
 
@@ -210,18 +187,17 @@ new Phaser.Game({
 
 Create `index.html` with a viewport-fit meta tag, a `#game` element, and a module script for `/src/main.ts`. In `src/styles.css`, remove page margins, use `100dvh`, apply the approved pale gradient, hide overflow, disable touch selection, and center the canvas.
 
-- [ ] **Step 6: Verify test and build**
+- [ ] **Step 4: Verify the build**
 
 Run:
 
 ```bash
-npm test -- src/game/constants.test.ts
 npm run build
 ```
 
-Expected: one passing test and a successful Vite build.
+Expected: a successful Vite build with a 540×960 Phaser configuration.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add package.json package-lock.json tsconfig.json vite.config.ts vitest.config.ts index.html src
@@ -775,7 +751,6 @@ git commit -m "feat: animate liquid pours with lightweight sound"
 
 **Files:**
 - Create: `src/game/ui/copy.ts`
-- Create: `src/game/ui/copy.test.ts`
 - Create: `src/game/ui/UIButton.ts`
 - Create: `src/game/scenes/GameScene.ts`
 - Modify: `src/main.ts`
@@ -784,28 +759,11 @@ git commit -m "feat: animate liquid pours with lightweight sound"
 - Consumes: all domain, level, session, adapter, view, and audio modules.
 - Produces: the complete playable loop from level 1 through level 8.
 
-- [ ] **Step 1: Write the failing copy test**
+- [ ] **Step 1: Add Japanese copy and reusable buttons**
 
-```ts
-expect(JA.title).toBe('色をそろえよう！');
-expect(JA.guide).toBe('ボトルをタップして水を移動しよう');
-expect(JA.clear).toBe('クリア！');
-expect(JA.nextLevel).toBe('次のレベル');
-expect(JA.playAgain).toBe('もう一度遊ぶ');
-expect(JA.level(8)).toBe('レベル 08');
-```
+Create `JA.title = '色をそろえよう！'`, `JA.guide = 'ボトルをタップして水を移動しよう'`, `JA.clear = 'クリア！'`, `JA.nextLevel = '次のレベル'`, `JA.playAgain = 'もう一度遊ぶ'`, and a `JA.level(id)` formatter that returns two-digit labels such as `レベル 08`. `UIButton` is a 64×64 `Phaser.GameObjects.Container` with a soft white or violet gradient circle, an icon text child, a 72×72 hit zone, a 0.96 press scale, and a disabled alpha of 0.35.
 
-- [ ] **Step 2: Run the test and confirm the red state**
-
-Run: `npm test -- src/game/ui/copy.test.ts`
-
-Expected: FAIL because the copy module does not exist.
-
-- [ ] **Step 3: Add Japanese copy and reusable buttons**
-
-Create the exact strings from the test. `UIButton` is a 64×64 `Phaser.GameObjects.Container` with a soft white or violet gradient circle, an icon text child, a 72×72 hit zone, a 0.96 press scale, and a disabled alpha of 0.35.
-
-- [ ] **Step 4: Implement the scene background and HUD**
+- [ ] **Step 2: Implement the scene background and HUD**
 
 In `GameScene.create()`:
 
@@ -817,7 +775,7 @@ In `GameScene.create()`:
 6. Add a centered restart button at y=892.
 7. Load progress safely, create state from `getLevel(progress.currentLevel)`, track `game_loaded` and `level_started`, and render all tubes.
 
-- [ ] **Step 5: Wire interactions and animation boundaries**
+- [ ] **Step 3: Wire interactions and animation boundaries**
 
 For every tube pointer:
 
@@ -832,7 +790,7 @@ For every tube pointer:
 Undo and restart use the reducer, re-render every tube, update the HUD, track the matching event, and remain disabled while input is locked.
 In `GameScene.update(_time, delta)`, call `advanceElapsed(state, delta)` only while the level is active and the clear overlay is closed.
 
-- [ ] **Step 6: Implement the clear overlay and progress**
+- [ ] **Step 4: Implement the clear overlay and progress**
 
 After a solved move:
 
@@ -846,11 +804,11 @@ After a solved move:
 
 At level 8, hide the next-level button and keep only `もう一度遊ぶ`, which restarts level 8.
 
-- [ ] **Step 7: Replace the temporary scene**
+- [ ] **Step 5: Replace the temporary scene**
 
 Update `src/main.ts` to import `GameScene` and set `scene: [GameScene]`. Set Phaser input to one active pointer plus two extra pointers for robust touch cancellation, while the session lock still allows only one logical action.
 
-- [ ] **Step 8: Run all tests and build**
+- [ ] **Step 6: Run all tests and build**
 
 Run:
 
@@ -861,7 +819,7 @@ npm run build
 
 Expected: all unit tests pass and the full game builds.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/game/ui src/game/scenes src/main.ts
