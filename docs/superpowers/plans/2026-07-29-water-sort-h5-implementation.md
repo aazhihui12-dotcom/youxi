@@ -113,9 +113,7 @@ Set the scripts in `package.json` to:
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "check:size": "node scripts/check-bundle-size.mjs",
-    "check": "npm run test && npm run build && npm run check:size"
+    "test:watch": "vitest"
   }
 }
 ```
@@ -830,6 +828,7 @@ git commit -m "feat: complete Japanese Water Sort game loop"
 
 **Files:**
 - Create: `scripts/check-bundle-size.mjs`
+- Modify: `package.json`
 - Modify: `README.md` if it exists; otherwise create `README.md`
 
 **Interfaces:**
@@ -860,6 +859,15 @@ const total = await sizeOf('dist');
 console.log(`dist size: ${total} bytes`);
 if (total > LIMIT) {
   throw new Error(`dist exceeds ${LIMIT} bytes`);
+}
+```
+
+Add these scripts to `package.json`:
+
+```json
+{
+  "check:size": "node scripts/check-bundle-size.mjs",
+  "check": "npm run test && npm run build && npm run check:size"
 }
 ```
 
