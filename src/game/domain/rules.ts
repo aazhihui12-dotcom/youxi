@@ -58,6 +58,7 @@ export function applyMove(
   const destination = board[move.to];
   const sourceSuffix = source?.slice(-move.amount);
   const destinationTop = destination?.[destination.length - 1];
+  const expectedMove = getPour(board, move.from, move.to, capacity);
 
   if (
     !Number.isInteger(move.from) ||
@@ -76,7 +77,10 @@ export function applyMove(
     sourceSuffix === undefined ||
     sourceSuffix.length !== move.amount ||
     !sourceSuffix.every((color) => color === move.color) ||
-    (destinationTop !== undefined && destinationTop !== move.color)
+    (destinationTop !== undefined && destinationTop !== move.color) ||
+    expectedMove === null ||
+    expectedMove.amount !== move.amount ||
+    expectedMove.color !== move.color
   ) {
     throw new RangeError('Invalid move');
   }

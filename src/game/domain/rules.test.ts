@@ -61,6 +61,18 @@ describe('Water Sort rules', () => {
     expect(board).toEqual([['blue', 'pink'], []]);
   });
 
+  it('rejects a partial pour without mutating the board', () => {
+    const board: BoardState = [['pink', 'pink'], []];
+
+    expect(() => applyMove(board, {
+      from: 0,
+      to: 1,
+      amount: 1,
+      color: 'pink',
+    })).toThrow(RangeError);
+    expect(board).toEqual([['pink', 'pink'], []]);
+  });
+
   it('recognizes boards made of empty and full monochrome tubes as solved', () => {
     expect(isSolved([['pink', 'pink', 'pink', 'pink'], []])).toBe(true);
   });
