@@ -28,7 +28,7 @@ function declarationsFor(selector: string): Map<string, string[]> {
 }
 
 describe('viewport sizing contract', () => {
-  it.each(['html', 'body', '#game'])(
+  it.each(['html', 'body'])(
     'keeps %s fixed to the current viewport so the canvas cannot grow its parent',
     (selector) => {
       const declarations = declarationsFor(selector);
@@ -37,6 +37,10 @@ describe('viewport sizing contract', () => {
       expect(declarations.get('min-height')).toEqual(['0']);
     },
   );
+
+  it('removes the legacy game root contract', () => {
+    expect(stylesheet).not.toMatch(/(^|,)\s*#game\s*(,|\{)/m);
+  });
 });
 
 describe('responsive shell contract', () => {
