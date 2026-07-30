@@ -573,12 +573,13 @@ describe('startGame', () => {
     expect(destroy).toHaveBeenCalledOnce();
   });
 
-  it('awaits rollback when observer setup fails and leaves only retry active', async () => {
+  it('falls back to window resize when ResizeObserver setup fails', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     installAnimationFrame();
     installCanvasContext();
+    let boardWidth = 320;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockReturnValue(new DOMRect(0, 0, 320, 480));
+      .mockImplementation(() => new DOMRect(0, 0, boardWidth, 480));
     const observeError = new Error('observer setup failed');
     const disconnect = vi.fn();
     class ThrowingResizeObserver {
@@ -589,47 +590,29 @@ describe('startGame', () => {
       disconnect = disconnect;
       unobserve = vi.fn();
     }
-    const reload = vi.fn();
     const injectedWindow = {
       ResizeObserver: ThrowingResizeObserver,
       devicePixelRatio: 1,
       performance: window.performance,
       localStorage: window.localStorage,
-      location: { reload },
+      location: { reload: vi.fn() },
       addEventListener: window.addEventListener.bind(window),
       removeEventListener: window.removeEventListener.bind(window),
     } as unknown as Window;
-    let finishDestroy = (): void => undefined;
-    const destroy = vi.spyOn(GameApp.prototype, 'destroy')
-      .mockImplementation(() => new Promise<void>((resolve) => {
-        finishDestroy = resolve;
-      }));
-    const pause = vi.spyOn(GameApp.prototype, 'pause');
-
-    const starting = startGame({
+    const resize = vi.spyOn(GameApp.prototype, 'resize');
+    const cleanup = await startGame({
       document,
       window: injectedWindow,
       parent: document.querySelector<HTMLElement>('#app')!,
     });
-    let settled = false;
-    void starting.then(
-      () => { settled = true; },
-      () => { settled = true; },
-    );
-    await Promise.resolve();
-    await Promise.resolve();
 
-    expect(destroy).toHaveBeenCalledOnce();
-    expect(settled).toBe(false);
-    finishDestroy();
-    await expect(starting).rejects.toThrow(observeError);
+    const callsBeforeResize = resize.mock.calls.length;
+    boardWidth = 360;
+    window.dispatchEvent(new Event('resize'));
 
-    const pauseCalls = pause.mock.calls.length;
-    window.dispatchEvent(new Event('pagehide'));
-    expect(pause).toHaveBeenCalledTimes(pauseCalls);
+    expect(resize.mock.calls.length).toBeGreaterThan(callsBeforeResize);
+    expect(document.querySelector<HTMLElement>('.fatal-error')!.hidden).toBe(true);
     expect(disconnect).toHaveBeenCalledOnce();
-    expect(document.body.textContent).toContain('ゲームを読み込めませんでした');
-    document.querySelector<HTMLButtonElement>('.retry-button')!.click();
-    expect(reload).toHaveBeenCalledOnce();
+    await cleanup();
   });
 });

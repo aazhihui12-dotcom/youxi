@@ -290,9 +290,19 @@ export async function startGame(input: {
     const ResizeObserverClass = (window as WindowWithResizeObserver).ResizeObserver
       ?? globalThis.ResizeObserver;
     if (typeof ResizeObserverClass === 'function') {
-      resizeObserver = new ResizeObserverClass(measureBoard);
-      resizeObserver.observe(shell.board);
-    } else {
+      try {
+        resizeObserver = new ResizeObserverClass(measureBoard);
+        resizeObserver.observe(shell.board);
+      } catch {
+        try {
+          resizeObserver?.disconnect();
+        } catch {
+          // A partial observer implementation must not block the game.
+        }
+        resizeObserver = null;
+      }
+    }
+    if (resizeObserver === null) {
       listen(window, 'resize', measureBoard);
     }
   };
