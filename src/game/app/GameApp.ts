@@ -52,6 +52,8 @@ const DEFAULT_PROGRESS: ProgressData = {
   soundEnabled: true,
 };
 
+const INVALID_SHAKE_MS = 160;
+
 export class GameApp {
   private readonly shell: DomShell;
   private readonly renderer: CanvasRenderer;
@@ -66,6 +68,7 @@ export class GameApp {
   private layout: ResponsiveLayout | null = null;
   private pressedTube: number | null = null;
   private pour: SceneRenderModel['pour'] = null;
+  private started = false;
   private paused = false;
   private destroyed = false;
   private animationToken = 0;
@@ -86,8 +89,9 @@ export class GameApp {
   }
 
   start(): void {
-    if (this.destroyed) return;
+    if (this.destroyed || this.started) return;
 
+    this.started = true;
     this.progress = loadProgress(this.storage);
     this.state = createGameState(getLevel(this.progress.currentLevel));
     this.cleared = false;
@@ -101,7 +105,7 @@ export class GameApp {
   }
 
   render(): void {
-    if (this.layout === null || this.destroyed) return;
+    if (!this.started || this.layout === null || this.destroyed) return;
 
     const validTargets = this.state.selectedTube === null
       ? new Set<number>()
@@ -117,15 +121,19 @@ export class GameApp {
           )),
         };
 
-    this.renderer.render(buildSceneRenderModel({
-      board: this.state.board,
-      selectedTube: this.state.selectedTube,
-      validTargets,
-      pressedTube: this.pressedTube,
-      layout,
-      quality: this.quality.config,
-      pour: this.pour,
-    }));
+    try {
+      this.renderer.render(buildSceneRenderModel({
+        board: this.state.board,
+        selectedTube: this.state.selectedTube,
+        validTargets,
+        pressedTube: this.pressedTube,
+        layout,
+        quality: this.quality.config,
+        pour: this.pour,
+      }));
+    } catch {
+      this.failActiveAnimation(this.animationToken);
+    }
   }
 
   hitTestTube(x: number, y: number): number | null {
@@ -134,13 +142,13 @@ export class GameApp {
   }
 
   setPressedTube(index: number | null): void {
-    if (this.destroyed) return;
+    if (!this.started || this.destroyed) return;
     this.pressedTube = index;
     this.scheduler.invalidate();
   }
 
   async tapTube(index: number): Promise<void> {
-    if (this.destroyed || this.paused || this.cleared) return;
+    if (!this.started || this.destroyed || this.paused || this.cleared) return;
     this.syncElapsed();
     const transition = reduceTapTube(this.state, index);
     this.state = transition.state;
@@ -167,7 +175,7 @@ export class GameApp {
   }
 
   undo(): void {
-    if (this.destroyed || this.paused || this.cleared) return;
+    if (!this.started || this.destroyed || this.paused || this.cleared) return;
     this.syncElapsed();
     this.state = undoState(this.state);
     this.syncControls();
@@ -175,7 +183,7 @@ export class GameApp {
   }
 
   restart(): void {
-    if (this.destroyed) return;
+    if (!this.started || this.destroyed) return;
     this.animationToken += 1;
     this.scheduler.stop();
     this.pointer.reset();
@@ -190,7 +198,7 @@ export class GameApp {
   }
 
   toggleSound(): void {
-    if (this.destroyed) return;
+    if (!this.started || this.destroyed) return;
     const enabled = !this.sound.enabled;
     this.sound.setEnabled(enabled);
     this.progress = { ...this.progress, soundEnabled: enabled };
@@ -199,7 +207,7 @@ export class GameApp {
   }
 
   nextLevel(): void {
-    if (this.destroyed) return;
+    if (!this.started || this.destroyed) return;
     const level = Math.min(LEVELS.length, this.state.levelId + 1);
     this.progress = {
       ...this.progress,
@@ -211,7 +219,7 @@ export class GameApp {
   }
 
   replay(): void {
-    if (this.destroyed) return;
+    if (!this.started || this.destroyed) return;
     this.replaceLevel(this.state.levelId);
   }
 
@@ -246,24 +254,27 @@ export class GameApp {
     );
     this.renderer.clearCache();
     this.syncControls();
+    this.reconcileSolvedState();
     if (!this.paused) this.scheduler.invalidate();
   }
 
   pause(): void {
-    if (this.paused || this.destroyed) return;
+    if (!this.started || this.paused || this.destroyed) return;
     this.syncElapsed();
     this.paused = true;
     this.animationToken += 1;
     this.scheduler.stop();
     this.pointer.reset();
-    this.pressedTube = null;
+    this.state = commitPendingMove(this.state);
+    this.clearTransientAnimation();
     this.syncControls();
   }
 
   resume(): void {
-    if (!this.paused || this.destroyed) return;
+    if (!this.started || !this.paused || this.destroyed) return;
     this.lastElapsedSample = this.now();
     this.paused = false;
+    this.reconcileSolvedState();
     this.syncControls();
     this.scheduler.invalidate();
   }
@@ -310,36 +321,41 @@ export class GameApp {
 
     try {
       await this.scheduler.animate((timeMs) => {
-        if (
-          token !== this.animationToken
-          || this.paused
-          || this.destroyed
-        ) {
+        try {
+          if (
+            token !== this.animationToken
+            || this.paused
+            || this.destroyed
+          ) {
+            return false;
+          }
+
+          if (animationStart === null) animationStart = timeMs;
+          if (previousTime !== null && timeMs > previousTime) {
+            this.observeAnimationFrame(timeMs - previousTime);
+          }
+          previousTime = timeMs;
+
+          const frame = samplePourFrame({
+            source,
+            target,
+            amount: move.amount,
+            elapsedMs: timeMs - animationStart,
+          });
+          this.pour = {
+            ...frame,
+            from: move.from,
+            to: move.to,
+            color: move.color,
+          };
+          return !frame.done;
+        } catch {
+          this.failActiveAnimation(token);
           return false;
         }
-
-        if (animationStart === null) animationStart = timeMs;
-        if (previousTime !== null && timeMs > previousTime) {
-          this.observeAnimationFrame(timeMs - previousTime);
-        }
-        previousTime = timeMs;
-
-        const frame = samplePourFrame({
-          source,
-          target,
-          amount: move.amount,
-          elapsedMs: timeMs - animationStart,
-        });
-        this.pour = {
-          ...frame,
-          from: move.from,
-          to: move.to,
-          color: move.color,
-        };
-        return !frame.done;
       });
     } catch {
-      // The reducer commit below is the recovery boundary for animation failures.
+      this.failActiveAnimation(token);
     } finally {
       this.syncElapsed();
       this.state = commitPendingMove(this.state);
@@ -393,7 +409,10 @@ export class GameApp {
       }
 
       if (animationStart === null) animationStart = timeMs;
-      const progress = Math.min(1, (timeMs - animationStart) / 180);
+      const progress = Math.min(
+        1,
+        (timeMs - animationStart) / INVALID_SHAKE_MS,
+      );
       this.shakeOffset = Math.sin(progress * Math.PI * 4)
         * (1 - progress)
         * 7;
@@ -431,6 +450,41 @@ export class GameApp {
       hasNext: this.state.levelId < LEVELS.length,
     });
     this.syncControls();
+  }
+
+  private failActiveAnimation(token: number): void {
+    if (
+      !this.started
+      || this.destroyed
+      || token !== this.animationToken
+      || this.state.pendingMove === null
+    ) {
+      this.scheduler.stop();
+      return;
+    }
+
+    this.animationToken += 1;
+    this.scheduler.stop();
+    this.pointer.reset();
+    this.syncElapsed();
+    this.state = commitPendingMove(this.state);
+    this.clearTransientAnimation();
+    this.syncControls();
+    this.reconcileSolvedState();
+    if (!this.paused && !this.destroyed) this.scheduler.invalidate();
+  }
+
+  private reconcileSolvedState(): void {
+    if (
+      this.started
+      && !this.destroyed
+      && !this.paused
+      && !this.cleared
+      && this.state.pendingMove === null
+      && isSolved(this.state.board)
+    ) {
+      this.finishLevel();
+    }
   }
 
   private replaceLevel(levelId: number): void {
@@ -471,7 +525,10 @@ export class GameApp {
   }
 
   private syncControls(): void {
-    const active = !this.destroyed && !this.paused && !this.cleared;
+    const active = this.started
+      && !this.destroyed
+      && !this.paused
+      && !this.cleared;
     this.shell.setControlsEnabled({
       undo: active
         && !this.state.inputLocked
