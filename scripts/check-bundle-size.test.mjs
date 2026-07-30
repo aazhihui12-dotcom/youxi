@@ -69,6 +69,26 @@ test('rejects a single-quoted absolute stylesheet asset path', async () => {
   assert.ok(report.errors.some((error) => error.includes('relative')));
 });
 
+test('accepts a relative script when data-src is absolute', async () => {
+  const root = await createBundle(
+    '<script data-src="/assets/deferred.js" src="./assets/app.js"></script>',
+    { 'app.js': 'export const ready = true;' },
+  );
+
+  const report = await inspectBundle(root);
+  assert.equal(report.errors.length, 0);
+});
+
+test('accepts a relative stylesheet when data-href is absolute', async () => {
+  const root = await createBundle(
+    '<link data-href="/assets/theme.css" href="./assets/app.css" rel="stylesheet">',
+    { 'app.css': 'body{}' },
+  );
+
+  const report = await inspectBundle(root);
+  assert.equal(report.errors.length, 0);
+});
+
 test('rejects JavaScript gzip overflow using gzip bytes', async () => {
   const contents = noisyContents(110_000);
   const root = await createBundle('<script src="./assets/app.js"></script>', {

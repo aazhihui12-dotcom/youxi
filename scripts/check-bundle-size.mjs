@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 function quotedAttribute(tag, name) {
-  const attribute = new RegExp(`\\b${name}\\s*=\\s*(['\"])(.*?)\\1`, 'i').exec(tag);
+  const attribute = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(['\"])(.*?)\\1`, 'i').exec(tag);
   return attribute?.[2];
 }
 
