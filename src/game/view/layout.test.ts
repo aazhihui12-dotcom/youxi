@@ -25,4 +25,14 @@ describe('computeTubeLayout', () => {
     expect(eight.positions.every(({ x }) => x >= 34 && x <= 326)).toBe(true);
     expect(eight.positions.every(({ y }) => y >= 210 && y <= 510)).toBe(true);
   });
+
+  it('keeps compact rows far enough apart for non-overlapping hit zones', () => {
+    const eight = computeTubeLayout(360, 640, 8);
+    const firstRowTube = eight.positions[0];
+    const secondRowTube = eight.positions[4];
+
+    expect(firstRowTube).toBeDefined();
+    expect(secondRowTube).toBeDefined();
+    expect(secondRowTube!.y - firstRowTube!.y).toBeGreaterThanOrEqual(204);
+  });
 });

@@ -15,6 +15,7 @@ const REFERENCE_TUBE_WIDTH = 60;
 const REFERENCE_TUBE_HEIGHT = 184;
 const REFERENCE_COLUMN_GAP = 114;
 const REFERENCE_ROW_Y = [370, 610] as const;
+const MINIMUM_ROW_GAP = 204;
 
 export function computeTubeLayout(
   viewportWidth: number,
@@ -28,17 +29,25 @@ export function computeTubeLayout(
   ];
   const scaleX = viewportWidth / GAME_WIDTH;
   const scaleY = viewportHeight / GAME_HEIGHT;
+  const referenceRowCenter = (REFERENCE_ROW_Y[0] + REFERENCE_ROW_Y[1]) / 2;
+  const referenceRowGap = REFERENCE_ROW_Y[1] - REFERENCE_ROW_Y[0];
+  const rowCenter = referenceRowCenter * scaleY;
+  const rowGap = Math.max(referenceRowGap * scaleY, MINIMUM_ROW_GAP);
+  const rowY = [
+    Math.round(rowCenter - rowGap / 2),
+    Math.round(rowCenter + rowGap / 2),
+  ] as const;
   const positions: TubePosition[] = [];
 
   rowCounts.forEach((count, rowIndex) => {
-    const rowY = REFERENCE_ROW_Y[rowIndex];
-    if (rowY === undefined) return;
+    const y = rowY[rowIndex];
+    if (y === undefined) return;
 
     for (let columnIndex = 0; columnIndex < count; columnIndex += 1) {
       const offset = (columnIndex - (count - 1) / 2) * REFERENCE_COLUMN_GAP;
       positions.push({
         x: Math.round((GAME_WIDTH / 2 + offset) * scaleX),
-        y: Math.round(rowY * scaleY),
+        y,
       });
     }
   });
