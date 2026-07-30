@@ -1,20 +1,45 @@
-import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
-const LIMIT = 3_000_000;
+export async function inspectBundle(distDir) {
+  const files = await readdir(path.join(distDir, 'assets'));
+  const jsFiles = files.filter((file) => file.endsWith('.js'));
+  const cssFiles = files.filter((file) => file.endsWith('.css'));
+  const errors = [];
+  let jsGzipBytes = 0;
+  let cssGzipBytes = 0;
 
-async function sizeOf(path) {
-  const info = await stat(path);
-  if (info.isFile()) return info.size;
-  const entries = await readdir(path);
-  return entries.reduce(async (sumPromise, entry) => {
-    const sum = await sumPromise;
-    return sum + await sizeOf(join(path, entry));
-  }, Promise.resolve(0));
+  for (const file of jsFiles) {
+    const contents = await readFile(path.join(distDir, 'assets', file));
+    jsGzipBytes += gzipSync(contents).byteLength;
+    if (/phaser/i.test(contents.toString('utf8'))) {
+      errors.push(`Phaser found in ${file}`);
+    }
+  }
+  for (const file of cssFiles) {
+    cssGzipBytes += gzipSync(
+      await readFile(path.join(distDir, 'assets', file)),
+    ).byteLength;
+  }
+  if (jsGzipBytes > 102_400) errors.push(`JavaScript gzip ${jsGzipBytes} > 102400`);
+  if (cssGzipBytes > 15_360) errors.push(`CSS gzip ${cssGzipBytes} > 15360`);
+
+  const html = await readFile(path.join(distDir, 'index.html'), 'utf8');
+  if (/\b(?:src|href)="\/assets\//.test(html)) {
+    errors.push('GitHub Pages assets must use relative paths');
+  }
+  return { jsGzipBytes, cssGzipBytes, errors };
 }
 
-const total = await sizeOf('dist');
-console.log(`dist size: ${total} bytes`);
-if (total > LIMIT) {
-  throw new Error(`dist exceeds ${LIMIT} bytes`);
+if (
+  process.argv[1] !== undefined
+  && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+) {
+  const report = await inspectBundle('dist');
+  console.log(`JavaScript gzip: ${report.jsGzipBytes} bytes`);
+  console.log(`CSS gzip: ${report.cssGzipBytes} bytes`);
+  for (const error of report.errors) console.error(error);
+  if (report.errors.length > 0) process.exitCode = 1;
 }

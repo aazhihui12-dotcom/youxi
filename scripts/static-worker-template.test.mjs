@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
 import { staticWorkerSource } from './static-worker-template.mjs';
 
@@ -8,52 +9,62 @@ async function loadWorker() {
   return module.default;
 }
 
-describe('static hosting worker', () => {
-  it('returns an existing static asset unchanged', async () => {
-    const assetResponse = new Response('asset', { status: 200 });
-    const fetch = vi.fn().mockResolvedValue(assetResponse);
-    const worker = await loadWorker();
+function createFetch(...responses) {
+  const requests = [];
+  return {
+    requests,
+    fetch: async (request) => {
+      requests.push(request);
+      return responses.shift();
+    },
+  };
+}
 
-    const response = await worker.fetch(
-      new Request('https://example.test/assets/game.js'),
-      { ASSETS: { fetch } },
-    );
+test('returns an existing static asset unchanged', async () => {
+  const assetResponse = new Response('asset', { status: 200 });
+  const { fetch, requests } = createFetch(assetResponse);
+  const worker = await loadWorker();
 
-    expect(response).toBe(assetResponse);
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
+  const response = await worker.fetch(
+    new Request('https://example.test/assets/game.js'),
+    { ASSETS: { fetch } },
+  );
 
-  it('falls back to index.html for missing HTML navigation requests', async () => {
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(new Response('missing', { status: 404 }))
-      .mockResolvedValueOnce(new Response('game', { status: 200 }));
-    const worker = await loadWorker();
+  assert.equal(response, assetResponse);
+  assert.equal(requests.length, 1);
+});
 
-    const response = await worker.fetch(
-      new Request('https://example.test/play', {
-        headers: { accept: 'text/html' },
-      }),
-      { ASSETS: { fetch } },
-    );
+test('falls back to index.html for missing HTML navigation requests', async () => {
+  const { fetch, requests } = createFetch(
+    new Response('missing', { status: 404 }),
+    new Response('game', { status: 200 }),
+  );
+  const worker = await loadWorker();
 
-    expect(await response.text()).toBe('game');
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetch.mock.calls[1][0].url).toBe('https://example.test/index.html');
-  });
+  const response = await worker.fetch(
+    new Request('https://example.test/play', {
+      headers: { accept: 'text/html' },
+    }),
+    { ASSETS: { fetch } },
+  );
 
-  it('preserves 404 responses for non-navigation requests', async () => {
-    const missingResponse = new Response('missing', { status: 404 });
-    const fetch = vi.fn().mockResolvedValue(missingResponse);
-    const worker = await loadWorker();
+  assert.equal(await response.text(), 'game');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].url, 'https://example.test/index.html');
+});
 
-    const response = await worker.fetch(
-      new Request('https://example.test/missing.json', {
-        headers: { accept: 'application/json' },
-      }),
-      { ASSETS: { fetch } },
-    );
+test('preserves 404 responses for non-navigation requests', async () => {
+  const missingResponse = new Response('missing', { status: 404 });
+  const { fetch, requests } = createFetch(missingResponse);
+  const worker = await loadWorker();
 
-    expect(response).toBe(missingResponse);
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
+  const response = await worker.fetch(
+    new Request('https://example.test/missing.json', {
+      headers: { accept: 'application/json' },
+    }),
+    { ASSETS: { fetch } },
+  );
+
+  assert.equal(response, missingResponse);
+  assert.equal(requests.length, 1);
 });
