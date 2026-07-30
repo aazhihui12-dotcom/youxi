@@ -29,8 +29,7 @@ const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
 export function computeResponsiveLayout(input: LayoutInput): ResponsiveLayout {
-  const width = Math.max(280, input.width);
-  const height = Math.max(228, input.height);
+  const { width, height } = input;
   const columns = input.tubeCount >= 7 ? 4 : 3;
   const rows = Math.ceil(input.tubeCount / columns);
   const paddingX = clamp(width * 0.04, 12, 20);

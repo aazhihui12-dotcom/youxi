@@ -51,6 +51,25 @@ describe('computeResponsiveLayout', () => {
       tube.centerX >= 0 && tube.centerX <= 480)).toBe(true);
   });
 
+  it('keeps hit areas inside a sub-228px landscape Canvas', () => {
+    const width = 480;
+    const height = 200;
+    const layout = computeResponsiveLayout({
+      width,
+      height,
+      tubeCount: 8,
+    });
+
+    expect(layout.width).toBe(width);
+    expect(layout.height).toBe(height);
+    for (const tube of layout.tubes) {
+      expect(tube.hitRect.x).toBeGreaterThanOrEqual(0);
+      expect(tube.hitRect.y).toBeGreaterThanOrEqual(0);
+      expect(tube.hitRect.x + tube.hitRect.width).toBeLessThanOrEqual(width);
+      expect(tube.hitRect.y + tube.hitRect.height).toBeLessThanOrEqual(height);
+    }
+  });
+
   it('returns the nearest containing tube hit area', () => {
     const layout = computeResponsiveLayout({
       width: 366,
