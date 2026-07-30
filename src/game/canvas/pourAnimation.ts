@@ -35,7 +35,10 @@ const ease = (value: number): number =>
   0.5 - Math.cos(Math.PI * clamp01(value)) / 2;
 
 export function buildPourTimeline(amount: number): PourTimeline {
-  const safeAmount = Math.min(4, Math.max(1, Math.round(amount)));
+  const safeAmount = Math.min(
+    4,
+    Math.max(1, Math.round(Number.isFinite(amount) ? amount : 1)),
+  );
   const pourMs = 250 + (safeAmount - 1) * 50;
 
   return {
@@ -59,7 +62,8 @@ export function samplePourFrame(input: PourFrameInput): PourFrame {
   const travelEnd = liftEnd + timeline.travelMs;
   const tiltEnd = travelEnd + timeline.tiltMs;
   const pourEnd = tiltEnd + timeline.pourMs;
-  const elapsed = Math.min(timeline.totalMs, Math.max(0, input.elapsedMs));
+  const safeElapsed = Number.isFinite(input.elapsedMs) ? input.elapsedMs : 0;
+  const elapsed = Math.min(timeline.totalMs, Math.max(0, safeElapsed));
   let sourceX = input.source.x;
   let sourceY = input.source.y;
   let rotation = 0;
