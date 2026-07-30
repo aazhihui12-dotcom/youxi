@@ -70,14 +70,16 @@ describe('startGame', () => {
     expect(document.body.textContent).toContain('ゲームを読み込めませんでした');
   });
 
-  it('maps Canvas CSS pointer coordinates and captures an accepted press', async () => {
+  it('scales client pointer coordinates into logical Canvas CSS coordinates', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     installAnimationFrame();
     installCanvasContext();
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockReturnValue(new DOMRect(0, 0, 320, 480));
-    vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect')
-      .mockReturnValue(new DOMRect(15, 30, 320, 480));
+      .mockImplementation(function getRect(this: HTMLElement) {
+        return this instanceof HTMLCanvasElement
+          ? new DOMRect(15, 30, 160, 240)
+          : new DOMRect(0, 0, 320, 480);
+      });
     const hitTest = vi.spyOn(GameApp.prototype, 'hitTestTube').mockReturnValue(2);
     const setPressed = vi.spyOn(GameApp.prototype, 'setPressedTube');
     const tapTube = vi.spyOn(GameApp.prototype, 'tapTube')
@@ -96,21 +98,49 @@ describe('startGame', () => {
 
     canvas.dispatchEvent(pointerEvent('pointerdown', {
       pointerId: 7,
-      clientX: 115,
-      clientY: 230,
+      clientX: 65,
+      clientY: 130,
     }));
     canvas.dispatchEvent(pointerEvent('pointerup', {
       pointerId: 7,
-      clientX: 115,
-      clientY: 230,
+      clientX: 65,
+      clientY: 130,
     }));
+    await cleanup();
 
     expect(hitTest).toHaveBeenCalledWith(100, 200);
     expect(setPointerCapture).toHaveBeenCalledWith(7);
     expect(setPressed).toHaveBeenNthCalledWith(1, 2);
     expect(setPressed).toHaveBeenLastCalledWith(null);
     expect(tapTube).toHaveBeenCalledWith(2);
+  });
+
+  it('ignores pointer input while the Canvas client rectangle has no area', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    installAnimationFrame();
+    installCanvasContext();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function getRect(this: HTMLElement) {
+        return this instanceof HTMLCanvasElement
+          ? new DOMRect(15, 30, 0, 0)
+          : new DOMRect(0, 0, 320, 480);
+      });
+    const hitTest = vi.spyOn(GameApp.prototype, 'hitTestTube').mockReturnValue(2);
+    const cleanup = await startGame({
+      document,
+      window,
+      parent: document.querySelector<HTMLElement>('#app')!,
+    });
+    const canvas = document.querySelector('canvas')!;
+
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 7,
+      clientX: 65,
+      clientY: 130,
+    }));
     await cleanup();
+
+    expect(hitTest).not.toHaveBeenCalled();
   });
 
   it('clears a pressed tube when pointer movement or cancellation aborts it', async () => {
@@ -283,5 +313,102 @@ describe('startGame', () => {
 
     expect(reload).toHaveBeenCalledOnce();
     await cleanup();
+  });
+
+  it('returns one cleanup promise that waits for destruction exactly once', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    installAnimationFrame();
+    installCanvasContext();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 0, 320, 480));
+    let finishDestroy = (): void => undefined;
+    const destroy = vi.spyOn(GameApp.prototype, 'destroy')
+      .mockImplementation(() => new Promise<void>((resolve) => {
+        finishDestroy = resolve;
+      }));
+    const cleanup = await startGame({
+      document,
+      window,
+      parent: document.querySelector<HTMLElement>('#app')!,
+    });
+
+    const firstCleanup = cleanup();
+    const secondCleanup = cleanup();
+    let firstSettled = false;
+    let secondSettled = false;
+    void firstCleanup.then(() => { firstSettled = true; });
+    void secondCleanup.then(() => { secondSettled = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+    const settledBeforeDestroy = { firstSettled, secondSettled };
+    finishDestroy();
+    await Promise.all([firstCleanup, secondCleanup]);
+
+    expect(firstCleanup).toBe(secondCleanup);
+    expect(settledBeforeDestroy).toEqual({
+      firstSettled: false,
+      secondSettled: false,
+    });
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it('awaits rollback when observer setup fails and leaves only retry active', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    installAnimationFrame();
+    installCanvasContext();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 0, 320, 480));
+    const observeError = new Error('observer setup failed');
+    const disconnect = vi.fn();
+    class ThrowingResizeObserver {
+      observe(): void {
+        throw observeError;
+      }
+
+      disconnect = disconnect;
+      unobserve = vi.fn();
+    }
+    const reload = vi.fn();
+    const injectedWindow = {
+      ResizeObserver: ThrowingResizeObserver,
+      devicePixelRatio: 1,
+      performance: window.performance,
+      localStorage: window.localStorage,
+      location: { reload },
+      addEventListener: window.addEventListener.bind(window),
+      removeEventListener: window.removeEventListener.bind(window),
+    } as unknown as Window;
+    let finishDestroy = (): void => undefined;
+    const destroy = vi.spyOn(GameApp.prototype, 'destroy')
+      .mockImplementation(() => new Promise<void>((resolve) => {
+        finishDestroy = resolve;
+      }));
+    const pause = vi.spyOn(GameApp.prototype, 'pause');
+
+    const starting = startGame({
+      document,
+      window: injectedWindow,
+      parent: document.querySelector<HTMLElement>('#app')!,
+    });
+    let settled = false;
+    void starting.then(
+      () => { settled = true; },
+      () => { settled = true; },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+    finishDestroy();
+    await expect(starting).rejects.toThrow(observeError);
+
+    const pauseCalls = pause.mock.calls.length;
+    window.dispatchEvent(new Event('pagehide'));
+    expect(pause).toHaveBeenCalledTimes(pauseCalls);
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(document.body.textContent).toContain('ゲームを読み込めませんでした');
+    document.querySelector<HTMLButtonElement>('.retry-button')!.click();
+    expect(reload).toHaveBeenCalledOnce();
   });
 });
