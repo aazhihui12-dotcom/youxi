@@ -6,6 +6,7 @@ import { SoundController } from '../audio/SoundController';
 import { GAME_HEIGHT, GAME_WIDTH, TUBE_CAPACITY } from '../constants';
 import { applyMove, getValidTargets, isSolved } from '../domain/rules';
 import type { Move, TubeState } from '../domain/types';
+import { PointerOwnershipGate } from '../input/pointerOwnership';
 import { LEVELS } from '../levels/levels';
 import { getLevel } from '../levels/repository';
 import {
@@ -25,6 +26,7 @@ import {
 } from '../session/progress';
 import { UIButton } from '../ui/UIButton';
 import { JA } from '../ui/copy';
+import { computeHudSafeAreaOffset } from '../ui/safeArea';
 import { PourAnimator } from '../view/PourAnimator';
 import { TubeView } from '../view/TubeView';
 import { computeTubeLayout } from '../view/layout';
@@ -67,6 +69,7 @@ export class GameScene extends Phaser.Scene {
   private tubeViews: TubeView[] = [];
   private clearOverlay: Phaser.GameObjects.Container | null = null;
   private confetti: ConfettiPiece[] = [];
+  private pointerGate = new PointerOwnershipGate();
   private firstInteractionTracked = false;
   private interactionBusy = false;
   private overlayTransitioning = false;
@@ -80,6 +83,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.shuttingDown = false;
+    this.pointerGate = new PointerOwnershipGate();
     this.drawBackground();
 
     this.progress = loadProgress(this.storage);
@@ -88,7 +92,7 @@ export class GameScene extends Phaser.Scene {
 
     const hudY = 64 + this.getSafeAreaAllowance();
     this.undoButton = new UIButton(this, 64, hudY, '↶');
-    this.undoButton.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, this.handleUndo, this);
+    this.bindOwnedAction(this.undoButton, () => this.handleUndo());
 
     this.levelText = this.add.text(GAME_WIDTH / 2, hudY, '', {
       color: TEXT_COLOR,
@@ -103,7 +107,7 @@ export class GameScene extends Phaser.Scene {
       hudY,
       this.soundController.enabled ? '♫' : '×',
     );
-    this.soundButton.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, this.handleSoundToggle, this);
+    this.bindOwnedAction(this.soundButton, () => this.handleSoundToggle());
 
     this.add.text(GAME_WIDTH / 2, 132, JA.title, {
       color: '#4d4664',
@@ -119,9 +123,13 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.restartButton = new UIButton(this, GAME_WIDTH / 2, 892, '↻', 'violet');
-    this.restartButton.on(
-      Phaser.Input.Events.GAMEOBJECT_POINTER_UP,
-      this.handleRestart,
+    this.bindOwnedAction(this.restartButton, () => this.handleRestart());
+
+    this.input.on(Phaser.Input.Events.POINTER_DOWN, this.handlePointerDown, this);
+    this.input.on(Phaser.Input.Events.POINTER_UP, this.handlePointerRelease, this);
+    this.input.on(
+      Phaser.Input.Events.POINTER_UP_OUTSIDE,
+      this.handlePointerRelease,
       this,
     );
 
@@ -206,7 +214,7 @@ export class GameScene extends Phaser.Scene {
         Phaser.Geom.Rectangle.Contains,
       );
       tube.setDepth(10);
-      tube.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
+      this.bindOwnedAction(tube, () => {
         void this.handleTubePointer(index);
       });
       return tube;
@@ -391,6 +399,37 @@ export class GameScene extends Phaser.Scene {
       && this.clearOverlay === null
       && !this.interactionBusy
       && !this.state.inputLocked;
+  }
+
+  private bindOwnedAction(
+    target: Phaser.GameObjects.GameObject,
+    action: () => void,
+  ): void {
+    target.on(
+      Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN,
+      (pointer: Phaser.Input.Pointer) => {
+        this.pointerGate.beginAction(pointer.id, target);
+      },
+    );
+    target.on(
+      Phaser.Input.Events.GAMEOBJECT_POINTER_UP,
+      (pointer: Phaser.Input.Pointer) => {
+        if (
+          !pointer.wasCanceled
+          && this.pointerGate.canAct(pointer.id, target)
+        ) {
+          action();
+        }
+      },
+    );
+  }
+
+  private handlePointerDown(pointer: Phaser.Input.Pointer): void {
+    this.pointerGate.begin(pointer.id);
+  }
+
+  private handlePointerRelease(pointer: Phaser.Input.Pointer): void {
+    this.pointerGate.release(pointer.id);
   }
 
   private trackFirstInteraction(): void {
@@ -598,7 +637,7 @@ export class GameScene extends Phaser.Scene {
     );
     button.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, () => button.setScale(0.98));
     button.on(Phaser.Input.Events.GAMEOBJECT_POINTER_OUT, () => button.setScale(1));
-    button.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
+    this.bindOwnedAction(button, () => {
       button.setScale(1);
       action();
     });
@@ -648,6 +687,13 @@ export class GameScene extends Phaser.Scene {
     this.shuttingDown = true;
     this.levelActive = false;
     this.levelEpoch += 1;
+    this.input.off(Phaser.Input.Events.POINTER_DOWN, this.handlePointerDown, this);
+    this.input.off(Phaser.Input.Events.POINTER_UP, this.handlePointerRelease, this);
+    this.input.off(
+      Phaser.Input.Events.POINTER_UP_OUTSIDE,
+      this.handlePointerRelease,
+      this,
+    );
     this.clearConfetti();
     this.tubeViews = [];
     this.clearOverlay = null;
@@ -665,8 +711,12 @@ export class GameScene extends Phaser.Scene {
 
     try {
       const cssPixels = Number.parseFloat(getComputedStyle(probe).paddingTop) || 0;
-      const canvasHeight = this.game.canvas.getBoundingClientRect().height || GAME_HEIGHT;
-      return Math.round(cssPixels * GAME_HEIGHT / canvasHeight);
+      const canvasRect = this.game.canvas.getBoundingClientRect();
+      return computeHudSafeAreaOffset({
+        insetTopCss: cssPixels,
+        canvasTopCss: canvasRect.top,
+        canvasHeightCss: canvasRect.height || GAME_HEIGHT,
+      });
     } finally {
       probe.remove();
     }
