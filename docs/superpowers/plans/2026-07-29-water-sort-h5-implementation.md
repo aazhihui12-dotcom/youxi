@@ -579,7 +579,7 @@ Expected: FAIL because `computeTubeLayout()` does not exist.
 
 - [ ] **Step 3: Implement the layout function**
 
-Use three columns for six or seven tubes and four columns for eight tubes. Use two rows, center the last incomplete row, scale the reference 540×960 coordinates to the current logical viewport, and return integer positions. Tube reference dimensions are 60×184.
+Use three columns for six tubes and four columns for seven or eight tubes. Use two rows, center the last incomplete row, scale the reference 540×960 coordinates to the current logical viewport, and return integer positions. Tube reference dimensions are 60×184.
 
 The six-tube layout must match the exact expected fixture. For seven tubes, use rows of four and three. For eight tubes, use four and four.
 
