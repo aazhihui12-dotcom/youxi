@@ -38,3 +38,25 @@ describe('viewport sizing contract', () => {
     },
   );
 });
+
+describe('responsive shell contract', () => {
+  it('uses dynamic viewport and safe-area padding', () => {
+    expect(stylesheet).toContain('.game-shell');
+    expect(stylesheet).toContain('height: 100dvh');
+    expect(stylesheet).toContain('env(safe-area-inset-top)');
+    expect(stylesheet).toContain('env(safe-area-inset-bottom)');
+  });
+
+  it('keeps touch controls at least 56 CSS pixels wide and tall', () => {
+    const declarations = declarationsFor('button');
+    expect(declarations.get('min-width')).toContain('56px');
+    expect(declarations.get('min-height')).toContain('56px');
+  });
+
+  it('contains an explicit landscape layout', () => {
+    expect(stylesheet).toContain('@media (orientation: landscape)');
+    expect(stylesheet).toContain(
+      'grid-template-columns: auto minmax(280px, 480px) auto',
+    );
+  });
+});
