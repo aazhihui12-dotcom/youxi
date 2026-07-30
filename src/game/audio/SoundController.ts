@@ -1,6 +1,7 @@
 export type SoundKind = 'select' | 'pour' | 'invalid' | 'success';
 
 type AudioContextConstructor = new () => AudioContext;
+type AudioContextFactory = () => AudioContext;
 
 interface WebkitAudioGlobal {
   webkitAudioContext?: AudioContextConstructor;
@@ -15,11 +16,26 @@ interface Note {
   gain: number;
 }
 
+function createBrowserAudioContext(): AudioContext {
+  const audioGlobal = globalThis as typeof globalThis & WebkitAudioGlobal;
+  const AudioContextClass = globalThis.AudioContext ?? audioGlobal.webkitAudioContext;
+  if (AudioContextClass === undefined) {
+    throw new Error('Web Audio is unavailable');
+  }
+
+  return new AudioContextClass();
+}
+
 export class SoundController {
   private context: AudioContext | null = null;
   private enabledState: boolean;
+  private disposed = false;
+  private disposal: Promise<void> | null = null;
 
-  constructor(enabled = true) {
+  constructor(
+    enabled = true,
+    private readonly contextFactory: AudioContextFactory = createBrowserAudioContext,
+  ) {
     this.enabledState = enabled;
   }
 
@@ -32,9 +48,28 @@ export class SoundController {
   }
 
   play(kind: SoundKind): void {
-    if (!this.enabledState) return;
+    if (!this.enabledState || this.disposed) return;
 
     void this.playSafely(kind);
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposal !== null) return this.disposal;
+
+    this.disposed = true;
+    this.enabledState = false;
+    const context = this.context;
+    this.context = null;
+    this.disposal = (async () => {
+      if (context === null) return;
+
+      try {
+        await context.close();
+      } catch {
+        // Audio cleanup must never interrupt scene shutdown.
+      }
+    })();
+    return this.disposal;
   }
 
   private async playSafely(kind: SoundKind): Promise<void> {
@@ -57,14 +92,11 @@ export class SoundController {
 
   private getOrCreateContext(): AudioContext {
     if (this.context !== null) return this.context;
-
-    const audioGlobal = globalThis as typeof globalThis & WebkitAudioGlobal;
-    const AudioContextClass = globalThis.AudioContext ?? audioGlobal.webkitAudioContext;
-    if (AudioContextClass === undefined) {
-      throw new Error('Web Audio is unavailable');
+    if (this.disposed) {
+      throw new Error('Sound controller has been disposed');
     }
 
-    this.context = new AudioContextClass();
+    this.context = this.contextFactory();
     return this.context;
   }
 

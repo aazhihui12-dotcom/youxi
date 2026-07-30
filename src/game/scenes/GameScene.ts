@@ -26,6 +26,7 @@ import {
 } from '../session/progress';
 import { UIButton } from '../ui/UIButton';
 import { JA } from '../ui/copy';
+import { nextGuideVisibility } from '../ui/guideVisibility';
 import { computeHudSafeAreaOffset } from '../ui/safeArea';
 import { PourAnimator } from '../view/PourAnimator';
 import { TubeView } from '../view/TubeView';
@@ -63,6 +64,7 @@ export class GameScene extends Phaser.Scene {
   private soundController!: SoundController;
   private pourAnimator!: PourAnimator;
   private levelText!: Phaser.GameObjects.Text;
+  private guideText!: Phaser.GameObjects.Text;
   private undoButton!: UIButton;
   private soundButton!: UIButton;
   private restartButton!: UIButton;
@@ -116,7 +118,7 @@ export class GameScene extends Phaser.Scene {
       fontStyle: 'bold',
     }).setOrigin(0.5);
 
-    this.add.text(GAME_WIDTH / 2, 180, JA.guide, {
+    this.guideText = this.add.text(GAME_WIDTH / 2, 180, JA.guide, {
       color: '#817994',
       fontFamily: FONT_FAMILY,
       fontSize: '18px',
@@ -241,6 +243,10 @@ export class GameScene extends Phaser.Scene {
     try {
       const transition = tapTube(this.state, index);
       this.state = transition.state;
+      this.guideText.setVisible(nextGuideVisibility(
+        this.guideText.visible,
+        transition.effect,
+      ));
 
       switch (transition.effect.kind) {
         case 'selected':
@@ -694,6 +700,7 @@ export class GameScene extends Phaser.Scene {
       this.handlePointerRelease,
       this,
     );
+    void this.soundController.dispose();
     this.clearConfetti();
     this.tubeViews = [];
     this.clearOverlay = null;
