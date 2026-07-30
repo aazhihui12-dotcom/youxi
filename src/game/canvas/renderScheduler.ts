@@ -4,6 +4,7 @@ export class RenderScheduler {
   private frameId: number | null = null;
   private step: AnimationStep | null = null;
   private resolveAnimation: (() => void) | null = null;
+  private generation = 0;
 
   constructor(
     private readonly render: () => void,
@@ -31,6 +32,7 @@ export class RenderScheduler {
   }
 
   stop(): void {
+    this.generation += 1;
     if (this.frameId !== null) this.cancelFrame(this.frameId);
     this.frameId = null;
     this.step = null;
@@ -41,10 +43,15 @@ export class RenderScheduler {
 
   private readonly onFrame = (timeMs: number): void => {
     this.frameId = null;
+    const generation = this.generation;
     const keepRunning = this.step?.(timeMs) ?? false;
+    if (this.generation !== generation) return;
+
     this.render();
+    if (this.generation !== generation) return;
+
     if (keepRunning) {
-      this.frameId = this.requestFrame(this.onFrame);
+      if (this.frameId === null) this.frameId = this.requestFrame(this.onFrame);
       return;
     }
 
