@@ -94,7 +94,7 @@ export function createDomShell(document: Document, parent: HTMLElement): DomShel
   fatalError.append(fatalMessage, retryButton);
 
   root.append(hud, guide, board, footer, clearPanel, fatalError);
-  parent.append(root);
+  parent.replaceChildren(root);
 
   const setLevel = (level: number) => {
     levelLabel.textContent = `レベル ${String(level).padStart(2, '0')}`;

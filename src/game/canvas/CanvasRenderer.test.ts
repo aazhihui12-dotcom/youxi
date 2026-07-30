@@ -260,22 +260,67 @@ describe('CanvasRenderer', () => {
     expect(createElement.mock.calls.length).toBeGreaterThan(afterExplicitClear);
   });
 
-  it('keys cached imagery by quality level and color sequence', () => {
+  it('reuses glass across color sequences and liquid across quality levels', () => {
     const createElement = installDocumentCanvasFallback();
     const renderer = new CanvasRenderer(createTargetCanvas());
     renderer.resize(390, 500, 1);
 
     renderer.render(createScene(HIGH_QUALITY, ['pink']));
-    const pinkHighCreations = createElement.mock.calls.length;
+    expect(createElement).toHaveBeenCalledTimes(2);
     renderer.render(createScene(HIGH_QUALITY, ['pink']));
-    expect(createElement).toHaveBeenCalledTimes(pinkHighCreations);
+    expect(createElement).toHaveBeenCalledTimes(2);
 
     renderer.render(createScene(HIGH_QUALITY, ['blue']));
-    expect(createElement.mock.calls.length).toBeGreaterThan(pinkHighCreations);
-    const blueHighCreations = createElement.mock.calls.length;
+    expect(createElement).toHaveBeenCalledTimes(3);
 
     renderer.render(createScene(LOW_QUALITY, ['blue']));
-    expect(createElement.mock.calls.length).toBeGreaterThan(blueHighCreations);
+    expect(createElement).toHaveBeenCalledTimes(4);
+  });
+
+  it('retains at most the 24 most recently used liquid sequences', () => {
+    const createElement = installDocumentCanvasFallback();
+    const renderer = new CanvasRenderer(createTargetCanvas());
+    const sequences = [
+      ['pink'],
+      ['yellow'],
+      ['mint'],
+      ['blue'],
+      ['purple'],
+      ['orange'],
+      ['pink', 'pink'],
+      ['pink', 'yellow'],
+      ['pink', 'mint'],
+      ['pink', 'blue'],
+      ['pink', 'purple'],
+      ['pink', 'orange'],
+      ['yellow', 'pink'],
+      ['yellow', 'yellow'],
+      ['yellow', 'mint'],
+      ['yellow', 'blue'],
+      ['yellow', 'purple'],
+      ['yellow', 'orange'],
+      ['mint', 'pink'],
+      ['mint', 'yellow'],
+      ['mint', 'mint'],
+      ['mint', 'blue'],
+      ['mint', 'purple'],
+      ['mint', 'orange'],
+      ['blue', 'pink'],
+    ] as const;
+    renderer.resize(390, 500, 1);
+
+    for (const colors of sequences) {
+      renderer.render(createScene(HIGH_QUALITY, colors));
+    }
+    expect(createElement).toHaveBeenCalledTimes(26);
+
+    for (const colors of sequences.slice(1)) {
+      renderer.render(createScene(HIGH_QUALITY, colors));
+    }
+    expect(createElement).toHaveBeenCalledTimes(26);
+
+    renderer.render(createScene(HIGH_QUALITY, sequences[0]));
+    expect(createElement).toHaveBeenCalledTimes(27);
   });
 
   it('uses document canvas fallback when OffscreenCanvas is unavailable', () => {
@@ -287,6 +332,35 @@ describe('CanvasRenderer', () => {
 
     expect(createElement).toHaveBeenCalledWith('canvas');
   });
+
+  it.each(['construction', 'context'] as const)(
+    'uses document canvas fallback when OffscreenCanvas %s fails',
+    (failure) => {
+      const createElement = vi.fn(() => ({
+        width: 0,
+        height: 0,
+        getContext: () => createContext(),
+      }) as unknown as HTMLCanvasElement);
+      class FailingOffscreenCanvas {
+        constructor(_width: number, _height: number) {
+          if (failure === 'construction') {
+            throw new Error('OffscreenCanvas construction failed');
+          }
+        }
+
+        getContext(): null {
+          return null;
+        }
+      }
+      vi.stubGlobal('document', { createElement });
+      vi.stubGlobal('OffscreenCanvas', FailingOffscreenCanvas);
+      const renderer = new CanvasRenderer(createTargetCanvas());
+      renderer.resize(390, 500, 1);
+
+      expect(() => renderer.render(createScene())).not.toThrow();
+      expect(createElement).toHaveBeenCalledWith('canvas');
+    },
+  );
 
   it('uses shadow blur for glow-enabled quality only', () => {
     const highAssignments: Array<{ property: string; value: unknown }> = [];
@@ -369,7 +443,7 @@ describe('CanvasRenderer', () => {
     const stateIndex = events.indexOf('stroke');
     const pourIndex = events.indexOf('translate');
     const sourceLiquidIndex = events.indexOf('image:2');
-    const sourceGlassIndex = events.indexOf('image:3');
+    const sourceGlassIndex = events.lastIndexOf('image:1');
 
     expect(clearIndex).toBeLessThan(backgroundIndex);
     expect(backgroundIndex).toBeLessThan(ellipseIndexes[0]!);
@@ -414,7 +488,7 @@ describe('CanvasRenderer', () => {
     expect(end.rects.some(({ x }) => x > 0)).toBe(false);
   });
 
-  it('paints the animated source liquid and shell exactly once', () => {
+  it('paints each static and animated liquid once while reusing glass', () => {
     installDocumentCanvasFallback();
     const observations = createObservations();
     const renderer = new CanvasRenderer(
@@ -429,7 +503,7 @@ describe('CanvasRenderer', () => {
     observations.drawImages.forEach(({ source }) => {
       paintsPerBitmap.set(source, (paintsPerBitmap.get(source) ?? 0) + 1);
     });
-    expect([...paintsPerBitmap.values()]).toEqual([1, 1, 1, 1]);
+    expect([...paintsPerBitmap.values()]).toEqual([1, 2, 1]);
   });
 
   it.each([

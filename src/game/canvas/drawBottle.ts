@@ -15,10 +15,7 @@ export const COLOR_STOPS: Record<ColorId, readonly [string, string, string]> = {
 
 type BitmapCanvas = HTMLCanvasElement | OffscreenCanvas;
 
-interface BottleCacheEntry {
-  liquid?: BitmapCanvas;
-  glass?: BitmapCanvas;
-}
+const LIQUID_CACHE_LIMIT = 24;
 
 export interface PourRenderState {
   source: TubeRenderModel;
@@ -66,18 +63,26 @@ function createBitmapCanvas(
 ): { canvas: BitmapCanvas; context: CanvasRenderingContext2D } {
   const width = Math.max(1, Math.round(cssWidth * pixelRatio));
   const height = Math.max(1, Math.round(cssHeight * pixelRatio));
-  let canvas: BitmapCanvas;
-
   if (typeof OffscreenCanvas !== 'undefined') {
-    canvas = new OffscreenCanvas(width, height);
-  } else if (typeof document !== 'undefined') {
-    canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-  } else {
-    throw new Error('Canvas bitmap creation is unavailable');
+    try {
+      const canvas = new OffscreenCanvas(width, height);
+      const context = canvas.getContext('2d') as CanvasRenderingContext2D | null;
+      if (context === null) {
+        throw new Error('OffscreenCanvas 2D context is unavailable');
+      }
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      return { canvas, context };
+    } catch {
+      // Some embedded browsers expose OffscreenCanvas without a usable 2D path.
+    }
   }
 
+  if (typeof document === 'undefined') {
+    throw new Error('Canvas bitmap creation is unavailable');
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
   const context = canvas.getContext('2d') as CanvasRenderingContext2D | null;
   if (context === null) {
     throw new Error('Canvas 2D context is unavailable');
@@ -86,17 +91,27 @@ function createBitmapCanvas(
   return { canvas, context };
 }
 
-function cacheKey(
+function sizeKey(
   tube: TubeRenderModel,
-  qualityLevel: QualityLevel,
+  pixelRatio: number,
 ): string {
   const { visualWidth, visualHeight } = tube.layout;
-  return [
-    visualWidth,
-    visualHeight,
-    qualityLevel,
-    tube.colors.join(','),
-  ].join(':');
+  return [visualWidth, visualHeight, pixelRatio].join(':');
+}
+
+function liquidCacheKey(
+  tube: TubeRenderModel,
+  pixelRatio: number,
+): string {
+  return [sizeKey(tube, pixelRatio), tube.colors.join(',')].join(':');
+}
+
+function glassCacheKey(
+  tube: TubeRenderModel,
+  pixelRatio: number,
+  qualityLevel: QualityLevel,
+): string {
+  return [sizeKey(tube, pixelRatio), qualityLevel].join(':');
 }
 
 function drawCachedLiquid(
@@ -233,7 +248,8 @@ function drawCachedGlass(
 }
 
 export class BottleBitmapCache {
-  private readonly entries = new Map<string, BottleCacheEntry>();
+  private readonly liquidEntries = new Map<string, BitmapCanvas>();
+  private readonly glassEntries = new Map<string, BitmapCanvas>();
   private pixelRatio = 1;
   private qualityLevel: QualityLevel = 'high';
 
@@ -243,45 +259,46 @@ export class BottleBitmapCache {
   }
 
   clear(): void {
-    this.entries.clear();
+    this.liquidEntries.clear();
+    this.glassEntries.clear();
   }
 
   liquid(tube: TubeRenderModel): BitmapCanvas {
-    const entry = this.entry(tube);
-    if (entry.liquid === undefined) {
-      const surface = createBitmapCanvas(
-        tube.layout.visualWidth,
-        tube.layout.visualHeight,
-        this.pixelRatio,
-      );
-      drawCachedLiquid(surface.context, tube);
-      entry.liquid = surface.canvas;
+    const key = liquidCacheKey(tube, this.pixelRatio);
+    const cached = this.liquidEntries.get(key);
+    if (cached !== undefined) {
+      this.liquidEntries.delete(key);
+      this.liquidEntries.set(key, cached);
+      return cached;
     }
-    return entry.liquid;
+
+    const surface = createBitmapCanvas(
+      tube.layout.visualWidth,
+      tube.layout.visualHeight,
+      this.pixelRatio,
+    );
+    drawCachedLiquid(surface.context, tube);
+    this.liquidEntries.set(key, surface.canvas);
+    if (this.liquidEntries.size > LIQUID_CACHE_LIMIT) {
+      const oldestKey = this.liquidEntries.keys().next().value;
+      if (oldestKey !== undefined) this.liquidEntries.delete(oldestKey);
+    }
+    return surface.canvas;
   }
 
   glass(tube: TubeRenderModel): BitmapCanvas {
-    const entry = this.entry(tube);
-    if (entry.glass === undefined) {
-      const surface = createBitmapCanvas(
-        tube.layout.visualWidth,
-        tube.layout.visualHeight,
-        this.pixelRatio,
-      );
-      drawCachedGlass(surface.context, tube, this.qualityLevel);
-      entry.glass = surface.canvas;
-    }
-    return entry.glass;
-  }
+    const key = glassCacheKey(tube, this.pixelRatio, this.qualityLevel);
+    const cached = this.glassEntries.get(key);
+    if (cached !== undefined) return cached;
 
-  private entry(tube: TubeRenderModel): BottleCacheEntry {
-    const key = cacheKey(tube, this.qualityLevel);
-    let entry = this.entries.get(key);
-    if (entry === undefined) {
-      entry = {};
-      this.entries.set(key, entry);
-    }
-    return entry;
+    const surface = createBitmapCanvas(
+      tube.layout.visualWidth,
+      tube.layout.visualHeight,
+      this.pixelRatio,
+    );
+    drawCachedGlass(surface.context, tube, this.qualityLevel);
+    this.glassEntries.set(key, surface.canvas);
+    return surface.canvas;
   }
 }
 

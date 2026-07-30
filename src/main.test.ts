@@ -7,6 +7,7 @@ import {
   vi,
 } from 'vitest';
 import { GameApp } from './game/app/GameApp';
+import { CanvasRenderer } from './game/canvas/CanvasRenderer';
 import { startGame } from './main';
 
 function installAnimationFrame(): void {
@@ -68,6 +69,54 @@ describe('startGame', () => {
     })).rejects.toThrow('Canvas 2D is unavailable');
 
     expect(document.body.textContent).toContain('ゲームを読み込めませんでした');
+  });
+
+  it('keeps retry usable and leaves no frame loop after an initial render failure', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const callbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    installCanvasContext();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 0, 320, 480));
+    vi.spyOn(CanvasRenderer.prototype, 'render')
+      .mockImplementation(() => {
+        throw new Error('initial render failed');
+      });
+    const reload = vi.fn();
+    const injectedWindow = {
+      devicePixelRatio: 1,
+      performance: window.performance,
+      localStorage: window.localStorage,
+      location: { reload },
+      addEventListener: window.addEventListener.bind(window),
+      removeEventListener: window.removeEventListener.bind(window),
+    } as unknown as Window;
+    const cleanup = await startGame({
+      document,
+      window: injectedWindow,
+      parent: document.querySelector<HTMLElement>('#app')!,
+    });
+
+    callbacks.shift()!(0);
+
+    const fatalText = document.body.textContent;
+    const controlsDisabled = [
+      document.querySelector<HTMLButtonElement>('.undo')!.disabled,
+      document.querySelector<HTMLButtonElement>('.restart-button')!.disabled,
+      document.querySelector<HTMLButtonElement>('.sound')!.disabled,
+    ];
+    const remainingFrames = callbacks.length;
+    document.querySelector<HTMLButtonElement>('.retry-button')!.click();
+    await cleanup();
+
+    expect(fatalText).toContain('ゲームを読み込めませんでした');
+    expect(controlsDisabled).toEqual([true, true, true]);
+    expect(remainingFrames).toBe(0);
+    expect(reload).toHaveBeenCalledOnce();
   });
 
   it('scales client pointer coordinates into logical Canvas CSS coordinates', async () => {
@@ -195,6 +244,178 @@ describe('startGame', () => {
       [null],
     ]);
     await cleanup();
+  });
+
+  it('falls back to the owning window pointer when capture throws and removes the fallback', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    installAnimationFrame();
+    installCanvasContext();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 0, 320, 480));
+    vi.spyOn(GameApp.prototype, 'hitTestTube').mockReturnValue(1);
+    const tapTube = vi.spyOn(GameApp.prototype, 'tapTube')
+      .mockResolvedValue(undefined);
+    const cleanup = await startGame({
+      document,
+      window,
+      parent: document.querySelector<HTMLElement>('#app')!,
+    });
+    const canvas = document.querySelector('canvas')!;
+    Object.defineProperty(canvas, 'setPointerCapture', {
+      configurable: true,
+      value: vi.fn(() => {
+        throw new Error('capture unavailable');
+      }),
+    });
+
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 7,
+      clientX: 20,
+      clientY: 20,
+    }));
+    window.dispatchEvent(pointerEvent('pointerup', {
+      pointerId: 8,
+      clientX: 20,
+      clientY: 20,
+    }));
+    window.dispatchEvent(pointerEvent('pointerup', {
+      pointerId: 7,
+      clientX: 20,
+      clientY: 20,
+    }));
+
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 9,
+      clientX: 20,
+      clientY: 20,
+    }));
+    window.dispatchEvent(pointerEvent('pointercancel', {
+      pointerId: 9,
+      clientX: 20,
+      clientY: 20,
+    }));
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 10,
+      clientX: 20,
+      clientY: 20,
+    }));
+    window.dispatchEvent(pointerEvent('pointerup', {
+      pointerId: 10,
+      clientX: 20,
+      clientY: 20,
+    }));
+
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 11,
+      clientX: 20,
+      clientY: 20,
+    }));
+    await cleanup();
+    window.dispatchEvent(pointerEvent('pointerup', {
+      pointerId: 11,
+      clientX: 20,
+      clientY: 20,
+    }));
+
+    expect(tapTube.mock.calls).toEqual([[1], [1]]);
+  });
+
+  it('clears pointer ownership on lost capture so the next tap works', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    installAnimationFrame();
+    installCanvasContext();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 0, 320, 480));
+    vi.spyOn(GameApp.prototype, 'hitTestTube').mockReturnValue(2);
+    const setPressed = vi.spyOn(GameApp.prototype, 'setPressedTube');
+    const tapTube = vi.spyOn(GameApp.prototype, 'tapTube')
+      .mockResolvedValue(undefined);
+    const cleanup = await startGame({
+      document,
+      window,
+      parent: document.querySelector<HTMLElement>('#app')!,
+    });
+    const canvas = document.querySelector('canvas')!;
+    Object.defineProperty(canvas, 'setPointerCapture', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 3,
+      clientX: 20,
+      clientY: 20,
+    }));
+    canvas.dispatchEvent(pointerEvent('lostpointercapture', {
+      pointerId: 3,
+      clientX: 20,
+      clientY: 20,
+    }));
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 4,
+      clientX: 20,
+      clientY: 20,
+    }));
+    canvas.dispatchEvent(pointerEvent('pointerup', {
+      pointerId: 4,
+      clientX: 20,
+      clientY: 20,
+    }));
+    await cleanup();
+
+    expect(setPressed.mock.calls).toEqual([[2], [null], [2], [null]]);
+    expect(tapTube).toHaveBeenCalledOnce();
+    expect(tapTube).toHaveBeenCalledWith(2);
+  });
+
+  it('clears pointer ownership on window blur so the next tap works', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    installAnimationFrame();
+    installCanvasContext();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 0, 320, 480));
+    vi.spyOn(GameApp.prototype, 'hitTestTube').mockReturnValue(0);
+    const setPressed = vi.spyOn(GameApp.prototype, 'setPressedTube');
+    const tapTube = vi.spyOn(GameApp.prototype, 'tapTube')
+      .mockResolvedValue(undefined);
+    const cleanup = await startGame({
+      document,
+      window,
+      parent: document.querySelector<HTMLElement>('#app')!,
+    });
+    const canvas = document.querySelector('canvas')!;
+    const releasePointerCapture = vi.fn();
+    Object.defineProperty(canvas, 'setPointerCapture', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(canvas, 'releasePointerCapture', {
+      configurable: true,
+      value: releasePointerCapture,
+    });
+
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 5,
+      clientX: 20,
+      clientY: 20,
+    }));
+    window.dispatchEvent(new Event('blur'));
+    canvas.dispatchEvent(pointerEvent('pointerdown', {
+      pointerId: 6,
+      clientX: 20,
+      clientY: 20,
+    }));
+    canvas.dispatchEvent(pointerEvent('pointerup', {
+      pointerId: 6,
+      clientX: 20,
+      clientY: 20,
+    }));
+    await cleanup();
+
+    expect(setPressed.mock.calls).toEqual([[0], [null], [0], [null]]);
+    expect(releasePointerCapture).toHaveBeenCalledWith(5);
+    expect(tapTube).toHaveBeenCalledOnce();
+    expect(tapTube).toHaveBeenCalledWith(0);
   });
 
   it('connects controls and lifecycle events, then removes them on cleanup', async () => {

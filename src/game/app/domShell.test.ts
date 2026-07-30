@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 
+import productionHtml from '../../../index.html?raw';
 import { createDomShell } from './domShell';
 
 describe('createDomShell', () => {
@@ -27,5 +28,19 @@ describe('createDomShell', () => {
     expect(shell.clearPanel.hidden).toBe(false);
     expect(shell.clearPanel.textContent).toContain('手数 12');
     expect(shell.clearPanel.textContent).toContain('タイム 18.4秒');
+  });
+
+  it('replaces the static Japanese loading prompt with the direct-entry shell', () => {
+    expect(productionHtml).toContain('ゲームを読み込んでいます');
+    expect(productionHtml).not.toMatch(/ログイン|登録|アカウント/);
+    const parent = document.createElement('div');
+    parent.innerHTML = '<p class="loading-prompt">ゲームを読み込んでいます…</p>';
+
+    createDomShell(document, parent);
+
+    expect(parent.querySelector('.loading-prompt')).toBeNull();
+    expect(parent.querySelectorAll('.game-shell')).toHaveLength(1);
+    expect(parent.textContent).toContain('色をそろえよう！');
+    expect(parent.textContent).not.toMatch(/ログイン|登録|アカウント/);
   });
 });

@@ -71,6 +71,7 @@ export class GameApp {
   private started = false;
   private paused = false;
   private destroyed = false;
+  private fatal = false;
   private animationToken = 0;
   private lastElapsedSample = 0;
   private cleared = false;
@@ -105,7 +106,14 @@ export class GameApp {
   }
 
   render(): void {
-    if (!this.started || this.layout === null || this.destroyed) return;
+    if (
+      !this.started
+      || this.layout === null
+      || this.destroyed
+      || this.fatal
+    ) {
+      return;
+    }
 
     const validTargets = this.state.selectedTube === null
       ? new Set<number>()
@@ -137,18 +145,26 @@ export class GameApp {
   }
 
   hitTestTube(x: number, y: number): number | null {
-    if (this.layout === null) return null;
+    if (this.layout === null || this.fatal) return null;
     return hitTestLayoutTube(this.layout.tubes, x, y);
   }
 
   setPressedTube(index: number | null): void {
-    if (!this.started || this.destroyed) return;
+    if (!this.started || this.destroyed || this.fatal) return;
     this.pressedTube = index;
     this.scheduler.invalidate();
   }
 
   async tapTube(index: number): Promise<void> {
-    if (!this.started || this.destroyed || this.paused || this.cleared) return;
+    if (
+      !this.started
+      || this.destroyed
+      || this.fatal
+      || this.paused
+      || this.cleared
+    ) {
+      return;
+    }
     this.syncElapsed();
     const transition = reduceTapTube(this.state, index);
     this.state = transition.state;
@@ -175,7 +191,15 @@ export class GameApp {
   }
 
   undo(): void {
-    if (!this.started || this.destroyed || this.paused || this.cleared) return;
+    if (
+      !this.started
+      || this.destroyed
+      || this.fatal
+      || this.paused
+      || this.cleared
+    ) {
+      return;
+    }
     this.syncElapsed();
     this.state = undoState(this.state);
     this.syncControls();
@@ -183,7 +207,7 @@ export class GameApp {
   }
 
   restart(): void {
-    if (!this.started || this.destroyed) return;
+    if (!this.started || this.destroyed || this.fatal) return;
     this.animationToken += 1;
     this.scheduler.stop();
     this.pointer.reset();
@@ -198,7 +222,7 @@ export class GameApp {
   }
 
   toggleSound(): void {
-    if (!this.started || this.destroyed) return;
+    if (!this.started || this.destroyed || this.fatal) return;
     const enabled = !this.sound.enabled;
     this.sound.setEnabled(enabled);
     this.progress = { ...this.progress, soundEnabled: enabled };
@@ -207,7 +231,7 @@ export class GameApp {
   }
 
   nextLevel(): void {
-    if (!this.started || this.destroyed) return;
+    if (!this.started || this.destroyed || this.fatal) return;
     const level = Math.min(LEVELS.length, this.state.levelId + 1);
     this.progress = {
       ...this.progress,
@@ -219,13 +243,14 @@ export class GameApp {
   }
 
   replay(): void {
-    if (!this.started || this.destroyed) return;
+    if (!this.started || this.destroyed || this.fatal) return;
     this.replaceLevel(this.state.levelId);
   }
 
   resize(input: { width: number; height: number }): void {
     if (
       this.destroyed
+      || this.fatal
       || !Number.isFinite(input.width)
       || !Number.isFinite(input.height)
       || input.width <= 0
@@ -259,7 +284,7 @@ export class GameApp {
   }
 
   pause(): void {
-    if (!this.started || this.paused || this.destroyed) return;
+    if (!this.started || this.paused || this.destroyed || this.fatal) return;
     this.syncElapsed();
     this.paused = true;
     this.animationToken += 1;
@@ -271,7 +296,7 @@ export class GameApp {
   }
 
   resume(): void {
-    if (!this.started || !this.paused || this.destroyed) return;
+    if (!this.started || !this.paused || this.destroyed || this.fatal) return;
     this.lastElapsedSample = this.now();
     this.paused = false;
     this.reconcileSolvedState();
@@ -456,10 +481,15 @@ export class GameApp {
     if (
       !this.started
       || this.destroyed
+      || this.fatal
       || token !== this.animationToken
-      || this.state.pendingMove === null
     ) {
       this.scheduler.stop();
+      return;
+    }
+
+    if (this.state.pendingMove === null) {
+      this.enterFatalState();
       return;
     }
 
@@ -478,6 +508,7 @@ export class GameApp {
     if (
       this.started
       && !this.destroyed
+      && !this.fatal
       && !this.paused
       && !this.cleared
       && this.state.pendingMove === null
@@ -518,6 +549,18 @@ export class GameApp {
     this.shakeOffset = 0;
   }
 
+  private enterFatalState(): void {
+    if (this.fatal || this.destroyed) return;
+
+    this.fatal = true;
+    this.animationToken += 1;
+    this.scheduler.stop();
+    this.pointer.reset();
+    this.clearTransientAnimation();
+    this.syncControls();
+    this.shell.showFatalError();
+  }
+
   private syncShell(): void {
     this.shell.setLevel(this.state.levelId);
     this.shell.setSoundEnabled(this.progress.soundEnabled);
@@ -527,6 +570,7 @@ export class GameApp {
   private syncControls(): void {
     const active = this.started
       && !this.destroyed
+      && !this.fatal
       && !this.paused
       && !this.cleared;
     this.shell.setControlsEnabled({

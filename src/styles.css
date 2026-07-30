@@ -14,6 +14,13 @@ body {
   min-height: 100%;
 }
 
+.loading-prompt {
+  box-sizing: border-box;
+  margin: 0;
+  padding-top: 45vh;
+  text-align: center;
+}
+
 body {
   margin: 0;
   overflow: hidden;

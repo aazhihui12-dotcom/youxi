@@ -98,6 +98,28 @@ export async function startGame(input: {
     const pointer = new PointerController(
       (x, y) => app?.hitTestTube(x, y) ?? null,
     );
+    let pointerOwner: number | null = null;
+    let fallbackOwner: number | null = null;
+    let handlePointerUp: EventListener;
+    let handlePointerCancel: EventListener;
+    const removePointerFallback = (pointerId?: number): void => {
+      if (
+        fallbackOwner === null
+        || (pointerId !== undefined && fallbackOwner !== pointerId)
+      ) {
+        return;
+      }
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+      fallbackOwner = null;
+    };
+    const installPointerFallback = (pointerId: number): void => {
+      removePointerFallback();
+      fallbackOwner = pointerId;
+      window.addEventListener('pointerup', handlePointerUp);
+      window.addEventListener('pointercancel', handlePointerCancel);
+    };
+    removers.push(removePointerFallback);
     app = new GameApp({
       shell,
       renderer,
@@ -166,11 +188,16 @@ export async function startGame(input: {
       const result = pointer.down(event.pointerId, point.x, point.y);
       if (result.kind !== 'pressed') return;
 
+      pointerOwner = event.pointerId;
       app?.setPressedTube(result.tube);
       try {
-        shell.canvas.setPointerCapture?.(event.pointerId);
+        if (typeof shell.canvas.setPointerCapture !== 'function') {
+          installPointerFallback(event.pointerId);
+          return;
+        }
+        shell.canvas.setPointerCapture(event.pointerId);
       } catch {
-        // Pointer interaction still works when capture is unavailable.
+        installPointerFallback(event.pointerId);
       }
     };
     const handlePointerMove: EventListener = (rawEvent) => {
@@ -178,14 +205,20 @@ export async function startGame(input: {
       const point = canvasPoint(event);
       if (point === null) {
         clearPressed(pointer.cancel(event.pointerId));
+        if (pointerOwner === event.pointerId) pointerOwner = null;
+        removePointerFallback(event.pointerId);
         releasePointer(shell.canvas, event.pointerId);
         return;
       }
 
       clearPressed(pointer.move(event.pointerId, point.x, point.y));
     };
-    const handlePointerUp: EventListener = (rawEvent) => {
+    handlePointerUp = (rawEvent) => {
       const event = rawEvent as PointerEvent;
+      if (pointerOwner !== event.pointerId) return;
+
+      pointerOwner = null;
+      removePointerFallback(event.pointerId);
       const point = canvasPoint(event);
       if (point === null) {
         clearPressed(pointer.cancel(event.pointerId));
@@ -200,15 +233,39 @@ export async function startGame(input: {
         void app?.tapTube(result.tube).catch(() => undefined);
       }
     };
-    const handlePointerCancel: EventListener = (rawEvent) => {
+    handlePointerCancel = (rawEvent) => {
       const event = rawEvent as PointerEvent;
+      if (pointerOwner !== event.pointerId) return;
+
+      pointerOwner = null;
+      removePointerFallback(event.pointerId);
       clearPressed(pointer.cancel(event.pointerId));
       releasePointer(shell.canvas, event.pointerId);
+    };
+    const handleLostPointerCapture: EventListener = (rawEvent) => {
+      const event = rawEvent as PointerEvent;
+      if (pointerOwner !== event.pointerId) return;
+
+      pointerOwner = null;
+      removePointerFallback(event.pointerId);
+      clearPressed(pointer.cancel(event.pointerId));
+    };
+    const handleWindowBlur = (): void => {
+      const owner = pointerOwner;
+      pointerOwner = null;
+      removePointerFallback();
+      if (owner !== null) {
+        pointer.cancel(owner);
+        releasePointer(shell.canvas, owner);
+      }
+      app?.setPressedTube(null);
     };
     listen(shell.canvas, 'pointerdown', handlePointerDown);
     listen(shell.canvas, 'pointermove', handlePointerMove);
     listen(shell.canvas, 'pointerup', handlePointerUp);
     listen(shell.canvas, 'pointercancel', handlePointerCancel);
+    listen(shell.canvas, 'lostpointercapture', handleLostPointerCapture);
+    listen(window, 'blur', handleWindowBlur);
 
     listen(shell.undoButton, 'click', () => app?.undo());
     listen(shell.soundButton, 'click', () => app?.toggleSound());

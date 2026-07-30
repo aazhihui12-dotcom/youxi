@@ -455,6 +455,54 @@ describe('GameApp', () => {
     expect(scheduler.running).toBe(false);
   });
 
+  it.each(['initial', 'idle'] as const)(
+    'enters a fatal idle state when the %s render fails',
+    async (failure) => {
+      const ports = createPorts();
+      const callbacks: FrameRequestCallback[] = [];
+      let app!: GameApp;
+      const scheduler = new RenderScheduler(
+        () => app.render(),
+        (callback) => {
+          callbacks.push(callback);
+          return callbacks.length;
+        },
+        () => undefined,
+      );
+      let renderCount = 0;
+      ports.renderer.render.mockImplementation(() => {
+        renderCount += 1;
+        if (failure === 'initial' || renderCount === 2) {
+          throw new Error('Canvas idle frame failed');
+        }
+      });
+      app = new GameApp({ ...ports, scheduler } as never);
+      app.resize({ width: 366, height: 540 });
+      app.start();
+
+      callbacks.shift()!(0);
+      if (failure === 'idle') {
+        expect(ports.shell.showFatalError).not.toHaveBeenCalled();
+        app.setPressedTube(0);
+        callbacks.shift()!(10);
+      }
+
+      expect(ports.shell.showFatalError).toHaveBeenCalledOnce();
+      expect(ports.pointer.reset).toHaveBeenCalled();
+      expect(ports.shell.setControlsEnabled).toHaveBeenLastCalledWith({
+        undo: false,
+        restart: false,
+        sound: false,
+      });
+      expect(callbacks).toHaveLength(0);
+      expect(scheduler.running).toBe(false);
+
+      app.setPressedTube(1);
+      await app.tapTube(0);
+      expect(callbacks).toHaveLength(0);
+    },
+  );
+
   it.each(['quality observation', 'quality DPR resize'] as const)(
     'settles a real scheduler animation when %s throws',
     async (failure) => {
