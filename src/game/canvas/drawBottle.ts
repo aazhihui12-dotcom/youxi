@@ -1,6 +1,7 @@
 import type { QualityConfig, QualityLevel } from './adaptiveQuality';
 import type { SceneRenderModel, TubeRenderModel } from './renderModel';
 import type { TubeLayout } from './responsiveLayout';
+import { TUBE_CAPACITY } from '../constants';
 import type { ColorId } from '../domain/types';
 
 export const COLOR_STOPS: Record<ColorId, readonly [string, string, string]> = {
@@ -17,6 +18,13 @@ type BitmapCanvas = HTMLCanvasElement | OffscreenCanvas;
 interface BottleCacheEntry {
   liquid?: BitmapCanvas;
   glass?: BitmapCanvas;
+}
+
+export interface PourRenderState {
+  source: TubeRenderModel;
+  target: TubeRenderModel;
+  sourceLiquidUnits: number;
+  targetLiquidUnits: number;
 }
 
 function roundedRectPath(
@@ -284,6 +292,53 @@ function tubeTopLeft(layout: TubeLayout): { x: number; y: number } {
   };
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function topColorCount(
+  colors: readonly ColorId[],
+  color: ColorId,
+): number {
+  let count = 0;
+  for (let index = colors.length - 1; index >= 0; index -= 1) {
+    if (colors[index] !== color) break;
+    count += 1;
+  }
+  return count;
+}
+
+export function buildPourRenderState(
+  model: SceneRenderModel,
+): PourRenderState | null {
+  const pour = model.pour;
+  if (pour === null || pour.from === pour.to) return null;
+  const source = model.tubes[pour.from];
+  const target = model.tubes[pour.to];
+  if (source === undefined || target === undefined) return null;
+
+  const amount = Math.min(
+    topColorCount(source.colors, pour.color),
+    Math.max(0, TUBE_CAPACITY - target.colors.length),
+  );
+  const progress = clamp(
+    Number.isFinite(pour.liquidProgress) ? pour.liquidProgress : 0,
+    0,
+    1,
+  );
+  const movedColors = Array<ColorId>(amount).fill(pour.color);
+
+  return {
+    source,
+    target: {
+      ...target,
+      colors: [...target.colors, ...movedColors],
+    },
+    sourceLiquidUnits: source.colors.length - amount * progress,
+    targetLiquidUnits: target.colors.length + amount * progress,
+  };
+}
+
 export function drawBackground(
   context: CanvasRenderingContext2D,
   width: number,
@@ -331,10 +386,62 @@ export function drawLiquid(
   context: CanvasRenderingContext2D,
   tube: TubeRenderModel,
   cache: BottleBitmapCache,
+  visibleUnits = tube.colors.length,
 ): void {
+  const safeUnits = clamp(visibleUnits, 0, tube.colors.length);
+  if (safeUnits === 0) return;
   const position = tubeTopLeft(tube.layout);
+  const bitmap = cache.liquid(tube);
+  if (safeUnits < tube.colors.length) {
+    const { visualWidth: width, visualHeight: height } = tube.layout;
+    const innerTop = height * 0.075;
+    const innerBottom = height * 0.91;
+    const layerHeight = (innerBottom - innerTop) / 4;
+    const liquidTop = position.y + innerBottom - safeUnits * layerHeight;
+    const liquidBottom = position.y + innerBottom;
+
+    context.save();
+    context.beginPath();
+    context.rect(
+      position.x,
+      liquidTop,
+      width,
+      liquidBottom - liquidTop,
+    );
+    context.clip();
+    context.drawImage(
+      bitmap,
+      position.x,
+      position.y,
+      width,
+      height,
+    );
+    context.restore();
+
+    if (!Number.isInteger(safeUnits)) {
+      const surfaceColor = tube.colors[Math.ceil(safeUnits) - 1];
+      if (surfaceColor !== undefined) {
+        context.save();
+        context.beginPath();
+        context.ellipse(
+          tube.layout.centerX,
+          liquidTop,
+          width * 0.33,
+          Math.max(2, width * 0.055),
+          0,
+          0,
+          Math.PI * 2,
+        );
+        context.fillStyle = COLOR_STOPS[surfaceColor][0];
+        context.fill();
+        context.restore();
+      }
+    }
+    return;
+  }
+
   context.drawImage(
-    cache.liquid(tube),
+    bitmap,
     position.x,
     position.y,
     tube.layout.visualWidth,
@@ -436,12 +543,11 @@ export function drawPour(
   context: CanvasRenderingContext2D,
   model: SceneRenderModel,
   cache: BottleBitmapCache,
+  renderState = buildPourRenderState(model),
 ): void {
   const pour = model.pour;
-  if (pour === null) return;
-  const source = model.tubes[pour.from];
-  const target = model.tubes[pour.to];
-  if (source === undefined || target === undefined) return;
+  if (pour === null || renderState === null) return;
+  const { source, target } = renderState;
 
   const overlay: TubeRenderModel = {
     ...source,
@@ -459,15 +565,18 @@ export function drawPour(
   context.save();
   context.translate(pour.sourceX, pour.sourceY);
   context.rotate(pour.rotation);
-  drawLiquid(context, overlay, cache);
+  drawLiquid(context, overlay, cache, renderState.sourceLiquidUnits);
   drawGlass(context, overlay, cache);
   context.restore();
 
   if (pour.streamProgress > 0) {
+    const lipLocalY = -source.layout.visualHeight / 2
+      + source.layout.visualHeight * 0.045
+      + Math.max(2, source.layout.visualWidth * 0.045);
     const streamStartX = pour.sourceX
-      + Math.cos(pour.rotation) * source.layout.visualWidth * 0.44;
+      - lipLocalY * Math.sin(pour.rotation);
     const streamStartY = pour.sourceY
-      + Math.sin(pour.rotation) * source.layout.visualWidth * 0.44;
+      + lipLocalY * Math.cos(pour.rotation);
     const streamEndY = target.layout.centerY - target.layout.visualHeight * 0.44;
     const streamGradient = context.createLinearGradient(
       streamStartX,

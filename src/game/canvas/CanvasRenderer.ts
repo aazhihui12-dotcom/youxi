@@ -1,5 +1,6 @@
 import {
   BottleBitmapCache,
+  buildPourRenderState,
   drawBackground,
   drawGlass,
   drawLiquid,
@@ -54,15 +55,40 @@ export class CanvasRenderer {
 
   render(model: SceneRenderModel): void {
     this.cache.configure(this.pixelRatio, model.quality.level);
+    const pourState = buildPourRenderState(model);
+    const staticTubes = pourState === null
+      ? model.tubes
+      : model.tubes.filter(({ index }) => index !== model.pour?.from);
     this.context.clearRect(0, 0, this.cssWidth, this.cssHeight);
     drawBackground(this.context, this.cssWidth, this.cssHeight);
-    for (const tube of model.tubes) drawTubeShadow(this.context, tube);
-    for (const tube of model.tubes) drawLiquid(this.context, tube, this.cache);
-    for (const tube of model.tubes) drawGlass(this.context, tube, this.cache);
-    for (const tube of model.tubes) {
+    for (const tube of staticTubes) drawTubeShadow(this.context, tube);
+    for (const tube of staticTubes) {
+      if (tube.index === model.pour?.to && pourState !== null) {
+        drawLiquid(
+          this.context,
+          pourState.target,
+          this.cache,
+          pourState.targetLiquidUnits,
+        );
+      } else {
+        drawLiquid(this.context, tube, this.cache);
+      }
+    }
+    for (const tube of staticTubes) {
+      drawGlass(
+        this.context,
+        tube.index === model.pour?.to && pourState !== null
+          ? pourState.target
+          : tube,
+        this.cache,
+      );
+    }
+    for (const tube of staticTubes) {
       drawTubeState(this.context, tube, model.quality);
     }
-    if (model.pour !== null) drawPour(this.context, model, this.cache);
+    if (pourState !== null) {
+      drawPour(this.context, model, this.cache, pourState);
+    }
   }
 
   clearCache(): void {

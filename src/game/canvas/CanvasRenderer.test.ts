@@ -8,9 +8,16 @@ interface FakeCanvas extends HTMLCanvasElement {
   readonly cacheId?: number;
 }
 
+interface CanvasObservations {
+  drawImages: Array<{ source: CanvasImageSource; args: readonly number[] }>;
+  moveTos: Array<{ x: number; y: number }>;
+  rects: Array<{ x: number; y: number; width: number; height: number }>;
+}
+
 function createContext(
   events: string[] = [],
   assignments: Array<{ property: string; value: unknown }> = [],
+  observations?: CanvasObservations,
 ): CanvasRenderingContext2D {
   const gradient = { addColorStop: vi.fn() };
   const methods: Record<string, (...args: unknown[]) => unknown> = {
@@ -21,15 +28,31 @@ function createContext(
     translate: () => events.push('translate'),
     rotate: () => events.push('rotate'),
     scale: () => events.push('scale'),
-    drawImage: (source) =>
-      events.push(`image:${String((source as FakeCanvas).cacheId ?? 'other')}`),
+    drawImage: (source, ...args) => {
+      events.push(`image:${String((source as FakeCanvas).cacheId ?? 'other')}`);
+      observations?.drawImages.push({
+        source: source as CanvasImageSource,
+        args: args as number[],
+      });
+    },
     beginPath: () => events.push('beginPath'),
     closePath: () => events.push('closePath'),
-    moveTo: () => events.push('moveTo'),
+    moveTo: (x, y) => {
+      events.push('moveTo');
+      observations?.moveTos.push({ x: Number(x), y: Number(y) });
+    },
     lineTo: () => events.push('lineTo'),
     quadraticCurveTo: () => events.push('quadraticCurveTo'),
     roundRect: () => events.push('roundRect'),
-    rect: () => events.push('rect'),
+    rect: (x, y, width, height) => {
+      events.push('rect');
+      observations?.rects.push({
+        x: Number(x),
+        y: Number(y),
+        width: Number(width),
+        height: Number(height),
+      });
+    },
     ellipse: () => events.push('ellipse'),
     arc: () => events.push('arc'),
     clip: () => events.push('clip'),
@@ -114,6 +137,63 @@ function createScene(
       completed: false,
       pressed: false,
     }],
+  };
+}
+
+function createObservations(): CanvasObservations {
+  return {
+    drawImages: [],
+    moveTos: [],
+    rects: [],
+  };
+}
+
+function createPourScene(input: {
+  from?: 0 | 1;
+  liquidProgress: number;
+  rotation?: number;
+  streamProgress?: number;
+}): SceneRenderModel {
+  const from = input.from ?? 0;
+  const to = from === 0 ? 1 : 0;
+  const layouts = [100, 300].map((centerX) => ({
+    centerX,
+    centerY: 200,
+    visualWidth: 60,
+    visualHeight: 180,
+    hitRect: {
+      x: centerX - 40,
+      y: 100,
+      width: 80,
+      height: 200,
+    },
+  }));
+  const sourceColors = ['blue', 'pink', 'pink'] as const;
+  const targetColors = ['pink'] as const;
+
+  return {
+    quality: LOW_QUALITY,
+    tubes: [0, 1].map((index) => ({
+      index,
+      colors: index === from ? sourceColors : targetColors,
+      layout: layouts[index]!,
+      selected: false,
+      validTarget: false,
+      completed: false,
+      pressed: false,
+    })),
+    pour: {
+      from,
+      to,
+      color: 'pink',
+      sourceX: layouts[from]!.centerX,
+      sourceY: 150,
+      rotation: input.rotation ?? 0,
+      streamProgress: input.streamProgress ?? 0,
+      liquidProgress: input.liquidProgress,
+      rippleProgress: 0,
+      done: false,
+    },
   };
 }
 
@@ -284,20 +364,108 @@ describe('CanvasRenderer', () => {
     const ellipseIndexes = events
       .map((event, index) => event === 'ellipse' ? index : -1)
       .filter((index) => index >= 0);
-    const liquid0Index = events.indexOf('image:0');
-    const liquid1Index = events.indexOf('image:1');
-    const glass0Index = events.indexOf('image:2');
-    const glass1Index = events.indexOf('image:3');
+    const targetLiquidIndex = events.indexOf('image:0');
+    const targetGlassIndex = events.indexOf('image:1');
     const stateIndex = events.indexOf('stroke');
     const pourIndex = events.indexOf('translate');
+    const sourceLiquidIndex = events.indexOf('image:2');
+    const sourceGlassIndex = events.indexOf('image:3');
 
     expect(clearIndex).toBeLessThan(backgroundIndex);
     expect(backgroundIndex).toBeLessThan(ellipseIndexes[0]!);
-    expect(ellipseIndexes[1]!).toBeLessThan(liquid0Index);
-    expect(liquid0Index).toBeLessThan(liquid1Index);
-    expect(liquid1Index).toBeLessThan(glass0Index);
-    expect(glass0Index).toBeLessThan(glass1Index);
-    expect(glass1Index).toBeLessThan(stateIndex);
+    expect(ellipseIndexes[0]!).toBeLessThan(targetLiquidIndex);
+    expect(targetLiquidIndex).toBeLessThan(targetGlassIndex);
+    expect(targetGlassIndex).toBeLessThan(stateIndex);
     expect(stateIndex).toBeLessThan(pourIndex);
+    expect(pourIndex).toBeLessThan(sourceLiquidIndex);
+    expect(sourceLiquidIndex).toBeLessThan(sourceGlassIndex);
+  });
+
+  it('drains the animated source and fills the target from the pending board', () => {
+    installDocumentCanvasFallback();
+    const start = createObservations();
+    const startRenderer = new CanvasRenderer(
+      createTargetCanvas(createContext([], [], start)),
+    );
+    startRenderer.resize(400, 400, 1);
+    startRenderer.render(createPourScene({ liquidProgress: 0 }));
+
+    vi.unstubAllGlobals();
+    installDocumentCanvasFallback();
+    const end = createObservations();
+    const endRenderer = new CanvasRenderer(
+      createTargetCanvas(createContext([], [], end)),
+    );
+    endRenderer.resize(400, 400, 1);
+    endRenderer.render(createPourScene({ liquidProgress: 1 }));
+
+    const targetAtStart = start.rects.find(({ x }) => x > 0);
+    const sourceAtEnd = end.rects.find(({ x }) => x < 0);
+    expect(targetAtStart).toBeDefined();
+    expect(targetAtStart!.x).toBeCloseTo(270);
+    expect(targetAtStart!.y).toBeCloseTo(236.225);
+    expect(targetAtStart!.height).toBeCloseTo(37.575);
+    expect(start.rects.some(({ x }) => x < 0)).toBe(false);
+
+    expect(sourceAtEnd).toBeDefined();
+    expect(sourceAtEnd!.x).toBeCloseTo(-30);
+    expect(sourceAtEnd!.y).toBeCloseTo(36.225);
+    expect(sourceAtEnd!.height).toBeCloseTo(37.575);
+    expect(end.rects.some(({ x }) => x > 0)).toBe(false);
+  });
+
+  it('paints the animated source liquid and shell exactly once', () => {
+    installDocumentCanvasFallback();
+    const observations = createObservations();
+    const renderer = new CanvasRenderer(
+      createTargetCanvas(createContext([], [], observations)),
+    );
+    renderer.resize(400, 400, 1);
+
+    renderer.render(createPourScene({ liquidProgress: 0.5 }));
+
+    expect(observations.drawImages).toHaveLength(4);
+    const paintsPerBitmap = new Map<CanvasImageSource, number>();
+    observations.drawImages.forEach(({ source }) => {
+      paintsPerBitmap.set(source, (paintsPerBitmap.get(source) ?? 0) + 1);
+    });
+    expect([...paintsPerBitmap.values()]).toEqual([1, 1, 1, 1]);
+  });
+
+  it.each([
+    {
+      label: 'rightward',
+      from: 0 as const,
+      rotation: Math.PI / 2,
+      expectedX: 179.2,
+    },
+    {
+      label: 'leftward',
+      from: 1 as const,
+      rotation: -Math.PI / 2,
+      expectedX: 220.8,
+    },
+  ])('starts a $label stream at the transformed top lip', ({
+    from,
+    rotation,
+    expectedX,
+  }) => {
+    installDocumentCanvasFallback();
+    const observations = createObservations();
+    const renderer = new CanvasRenderer(
+      createTargetCanvas(createContext([], [], observations)),
+    );
+    renderer.resize(400, 400, 1);
+
+    renderer.render(createPourScene({
+      from,
+      liquidProgress: 0.5,
+      rotation,
+      streamProgress: 0.5,
+    }));
+
+    expect(observations.moveTos).toHaveLength(1);
+    expect(observations.moveTos[0]!.x).toBeCloseTo(expectedX);
+    expect(observations.moveTos[0]!.y).toBeCloseTo(150);
   });
 });
