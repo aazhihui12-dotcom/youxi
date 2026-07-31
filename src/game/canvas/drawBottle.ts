@@ -13,7 +13,7 @@ export const COLOR_STOPS: Record<ColorId, readonly [string, string, string]> = {
   orange: ['#ffc09a', '#ff925c', '#d96b3d'],
 };
 
-type BitmapCanvas = HTMLCanvasElement | OffscreenCanvas;
+type BitmapCanvas = HTMLCanvasElement;
 
 const LIQUID_CACHE_LIMIT = 24;
 
@@ -63,20 +63,6 @@ function createBitmapCanvas(
 ): { canvas: BitmapCanvas; context: CanvasRenderingContext2D } {
   const width = Math.max(1, Math.round(cssWidth * pixelRatio));
   const height = Math.max(1, Math.round(cssHeight * pixelRatio));
-  if (typeof OffscreenCanvas !== 'undefined') {
-    try {
-      const canvas = new OffscreenCanvas(width, height);
-      const context = canvas.getContext('2d') as CanvasRenderingContext2D | null;
-      if (context === null) {
-        throw new Error('OffscreenCanvas 2D context is unavailable');
-      }
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      return { canvas, context };
-    } catch {
-      // Some embedded browsers expose OffscreenCanvas without a usable 2D path.
-    }
-  }
-
   if (typeof document === 'undefined') {
     throw new Error('Canvas bitmap creation is unavailable');
   }

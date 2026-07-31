@@ -362,6 +362,46 @@ describe('CanvasRenderer', () => {
     },
   );
 
+  it('renders when exposed OffscreenCanvas objects cannot be composited', () => {
+    class PartialOffscreenCanvas {
+      constructor(
+        readonly width: number,
+        readonly height: number,
+      ) {}
+
+      getContext(): CanvasRenderingContext2D {
+        return createContext();
+      }
+    }
+    vi.stubGlobal('OffscreenCanvas', PartialOffscreenCanvas);
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => createContext(),
+      }),
+    });
+    const observations = createObservations();
+    const context = createContext([], [], observations);
+    context.drawImage = (
+      source: CanvasImageSource,
+      ...args: unknown[]
+    ): void => {
+      if (source instanceof PartialOffscreenCanvas) {
+        throw new TypeError('OffscreenCanvas cannot be used as a CanvasImageSource');
+      }
+      observations.drawImages.push({
+        source,
+        args: args.map(Number),
+      });
+    };
+    const renderer = new CanvasRenderer(createTargetCanvas(context));
+    renderer.resize(390, 500, 1);
+
+    expect(() => renderer.render(createScene())).not.toThrow();
+    expect(observations.drawImages).toHaveLength(2);
+  });
+
   it('uses shadow blur for glow-enabled quality only', () => {
     const highAssignments: Array<{ property: string; value: unknown }> = [];
     installDocumentCanvasFallback(highAssignments);
