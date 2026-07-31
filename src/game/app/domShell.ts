@@ -25,7 +25,14 @@ export interface DomShell {
     hasNext: boolean;
   }): void;
   hideClear(): void;
-  showFatalError(): void;
+  showFatalError(input: { code: string; error: unknown }): void;
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  return String(error);
 }
 
 function button(
@@ -90,8 +97,10 @@ export function createDomShell(document: Document, parent: HTMLElement): DomShel
   fatalError.hidden = true;
   const fatalMessage = document.createElement('p');
   fatalMessage.textContent = 'ゲームを読み込めませんでした';
+  const fatalDetail = document.createElement('small');
+  fatalDetail.className = 'fatal-detail';
   const retryButton = button(document, 'retry-button', 'もう一度試す', 'もう一度試す');
-  fatalError.append(fatalMessage, retryButton);
+  fatalError.append(fatalMessage, fatalDetail, retryButton);
 
   root.append(hud, guide, board, footer, clearPanel, fatalError);
   parent.replaceChildren(root);
@@ -137,7 +146,8 @@ export function createDomShell(document: Document, parent: HTMLElement): DomShel
     hideClear: () => {
       clearPanel.hidden = true;
     },
-    showFatalError: () => {
+    showFatalError: ({ code, error }) => {
+      fatalDetail.textContent = `診断: ${code} / ${describeError(error)}`;
       fatalError.hidden = false;
     },
   };

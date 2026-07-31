@@ -131,6 +131,16 @@ button:disabled {
   text-align: center;
 }
 
+.fatal-detail {
+  display: block;
+  margin: 8px 0 18px;
+  overflow-wrap: anywhere;
+  color: #837b98;
+  font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 @media (orientation: landscape) {
   .game-shell {
     grid-template-columns: auto minmax(280px, 480px) auto;

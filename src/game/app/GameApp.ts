@@ -139,8 +139,8 @@ export class GameApp {
         quality: this.quality.config,
         pour: this.pour,
       }));
-    } catch {
-      this.failActiveAnimation(this.animationToken);
+    } catch (error) {
+      this.failActiveAnimation(this.animationToken, error);
     }
   }
 
@@ -477,7 +477,7 @@ export class GameApp {
     this.syncControls();
   }
 
-  private failActiveAnimation(token: number): void {
+  private failActiveAnimation(token: number, error?: unknown): void {
     if (
       !this.started
       || this.destroyed
@@ -489,7 +489,7 @@ export class GameApp {
     }
 
     if (this.state.pendingMove === null) {
-      this.enterFatalState();
+      this.enterFatalState(error);
       return;
     }
 
@@ -549,7 +549,7 @@ export class GameApp {
     this.shakeOffset = 0;
   }
 
-  private enterFatalState(): void {
+  private enterFatalState(error: unknown): void {
     if (this.fatal || this.destroyed) return;
 
     this.fatal = true;
@@ -558,7 +558,7 @@ export class GameApp {
     this.pointer.reset();
     this.clearTransientAnimation();
     this.syncControls();
-    this.shell.showFatalError();
+    this.shell.showFatalError({ code: 'RENDER', error });
   }
 
   private syncShell(): void {

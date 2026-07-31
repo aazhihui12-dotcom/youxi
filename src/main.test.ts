@@ -69,6 +69,8 @@ describe('startGame', () => {
     })).rejects.toThrow('Canvas 2D is unavailable');
 
     expect(document.body.textContent).toContain('ゲームを読み込めませんでした');
+    expect(document.querySelector('.fatal-detail')?.textContent)
+      .toBe('診断: INIT / Error: Canvas 2D is unavailable');
   });
 
   it('keeps retry usable and leaves no frame loop after an initial render failure', async () => {
@@ -104,6 +106,7 @@ describe('startGame', () => {
     callbacks.shift()!(0);
 
     const fatalText = document.body.textContent;
+    const fatalDetail = document.querySelector('.fatal-detail')?.textContent;
     const controlsDisabled = [
       document.querySelector<HTMLButtonElement>('.undo')!.disabled,
       document.querySelector<HTMLButtonElement>('.restart-button')!.disabled,
@@ -114,6 +117,7 @@ describe('startGame', () => {
     await cleanup();
 
     expect(fatalText).toContain('ゲームを読み込めませんでした');
+    expect(fatalDetail).toBe('診断: RENDER / Error: initial render failed');
     expect(controlsDisabled).toEqual([true, true, true]);
     expect(remainingFrames).toBe(0);
     expect(reload).toHaveBeenCalledOnce();

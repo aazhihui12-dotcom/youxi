@@ -319,7 +319,7 @@ export async function startGame(input: {
     } catch {
       // The initialization error remains the primary failure.
     }
-    shell.showFatalError();
+    shell.showFatalError({ code: 'INIT', error });
     enableFatalRetry();
     throw error;
   }
